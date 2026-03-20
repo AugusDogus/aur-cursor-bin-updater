@@ -10,10 +10,10 @@ GitHub Actions workflows that track Cursor’s **early access** and **nightly** 
 
 ```bash
 # Early access
-yay -S cursor-early-access-bin
+paru -S cursor-early-access-bin
 
 # Nightly
-yay -S cursor-nightly-bin
+paru -S cursor-nightly-bin
 ```
 
 Only one `provides=('cursor')` Cursor package should be installed at a time. These builds **conflict** with `cursor-bin`, [`cursor-ide-bin`](https://aur.archlinux.org/packages/cursor-ide-bin), and the sibling channel package (early access vs nightly).
