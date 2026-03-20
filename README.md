@@ -20,7 +20,9 @@ yay -S cursor-early-access-bin
 yay -S cursor-nightly-bin
 ```
 
-For stable `cursor-bin`, use the upstream package/repository.
+Only one `provides=('cursor')` Cursor package should be installed at a time. These builds **conflict** with `cursor-bin`, [`cursor-ide-bin`](https://aur.archlinux.org/packages/cursor-ide-bin), and the sibling channel package (early access vs nightly).
+
+For stable `cursor-bin`, use the upstream package/repository. For stable Cursor with **bundled** Electron (similar to this repo’s approach), use [`cursor-ide-bin`](https://aur.archlinux.org/packages/cursor-ide-bin).
 
 ## Repository Layout
 
@@ -30,8 +32,8 @@ For stable `cursor-bin`, use the upstream package/repository.
 | `.github/workflows/update-aur-nightly.yml` | Publishes `cursor-nightly-bin` |
 | `PKGBUILD.early-access.sed` | Early access PKGBUILD template |
 | `PKGBUILD.nightly.sed` | Nightly PKGBUILD template |
-| `cursor.desktop` | Desktop entry (published with PKGBUILD) |
-| `cursor-launcher.sh` | `/usr/bin/cursor` wrapper; runs bundled Electron |
+| `cursor.desktop` | Desktop entry (copied to the AUR repo next to the PKGBUILD) |
+| `cursor-launcher.sh` | `/usr/bin/cursor` wrapper; runs bundled Electron (same) |
 
 ## How Updates Work
 
@@ -40,8 +42,8 @@ For stable `cursor-bin`, use the upstream package/repository.
 3. It queries Cursor update API for the channel track:
    - early access -> `prerelease`
    - nightly -> `dev`
-4. It renders PKGBUILD from template with latest version/commit/checksum.
-5. On `main`, it publishes to AUR.
+4. It renders the channel `PKGBUILD` from the matching `.sed` template (version, commit, `.deb` checksum).
+5. On `main`, it publishes to the AUR: the `PKGBUILD` plus `cursor.desktop` and `cursor-launcher.sh` as extra sources.
 6. On `development`, it stops before AUR publish.
 
 Channel `PKGBUILD` files are tracked in git for audit history:
@@ -56,7 +58,12 @@ Channel `PKGBUILD` files are tracked in git for audit history:
 
 ## Packaging approach
 
-These packages install the official `.deb` **without** swapping in system Electron or Node (unlike typical `cursor-bin` packaging). That matches upstream’s tested runtime, avoids subtle breakage, and keeps process monitoring sane—same idea as [cursor-ide-bin](https://github.com/lone-cloud/cursor-ide-bin) on the AUR. Optional flags can still be set via `~/.config/cursor-flags.conf` (see `cursor-launcher.sh`).
+These packages install the official `.deb` **without** swapping in system Electron or Node (unlike typical `cursor-bin` packaging). That matches upstream’s tested runtime, avoids subtle breakage, and keeps process monitoring sane—same idea as [cursor-ide-bin](https://github.com/lone-cloud/cursor-ide-bin) / [`cursor-ide-bin` (AUR)](https://aur.archlinux.org/packages/cursor-ide-bin).
+
+- **Runtime**: Electron and Node come from the upstream bundle; `ripgrep` is no longer replaced by a wrapper script (`rg.sh` was removed).
+- **Build**: `imagemagick` trims the pixmap icon; `chrome-sandbox` is set setuid when present.
+- **Flags**: optional Chromium/Electron flags via `~/.config/cursor-flags.conf` (one flag per line; see `cursor-launcher.sh`).
+- **License file**: the PKGBUILD installs `LICENSE.txt` from the usual path inside the `.deb`, or searches under `/usr/share/cursor` if it moves; if none is found, the build warns and continues.
 
 ## Related
 
