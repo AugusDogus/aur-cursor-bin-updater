@@ -69,8 +69,3 @@ This repository is **not** a straight fork of either project below; it **combine
 - **[Gunther-Schulz/aur-cursor-bin-updater](https://github.com/Gunther-Schulz/aur-cursor-bin-updater)** — automated PKGBUILD updates driven by Cursor’s API (a pattern this repo still uses for **channel** tracking). The **pre-release** packages here intentionally **do not** follow the system-`electron` split still common in `cursor-bin`-style recipes.
 
 Neither project above is responsible for this repo’s packages; mistakes or policy choices here are ours.
-
-## Related
-
-- [Cursor IDE](https://www.cursor.com)
-- [AUR submission guidelines](https://wiki.archlinux.org/title/AUR_submission_guidelines)
