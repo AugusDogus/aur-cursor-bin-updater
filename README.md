@@ -30,7 +30,8 @@ For stable `cursor-bin`, use the upstream package/repository.
 | `.github/workflows/update-aur-nightly.yml` | Publishes `cursor-nightly-bin` |
 | `PKGBUILD.early-access.sed` | Early access PKGBUILD template |
 | `PKGBUILD.nightly.sed` | Nightly PKGBUILD template |
-| `rg.sh` | ripgrep wrapper included in package assets |
+| `cursor.desktop` | Desktop entry (published with PKGBUILD) |
+| `cursor-launcher.sh` | `/usr/bin/cursor` wrapper; runs bundled Electron |
 
 ## How Updates Work
 
@@ -53,7 +54,12 @@ Channel `PKGBUILD` files are tracked in git for audit history:
 - [cursor-nightly-bin](https://aur.archlinux.org/packages/cursor-nightly-bin)
 - GitHub Actions workflow runs
 
+## Packaging approach
+
+These packages install the official `.deb` **without** swapping in system Electron or Node (unlike typical `cursor-bin` packaging). That matches upstream’s tested runtime, avoids subtle breakage, and keeps process monitoring sane—same idea as [cursor-ide-bin](https://github.com/lone-cloud/cursor-ide-bin) on the AUR. Optional flags can still be set via `~/.config/cursor-flags.conf` (see `cursor-launcher.sh`).
+
 ## Related
 
 - [Cursor IDE](https://www.cursor.com)
+- [cursor-ide-bin](https://github.com/lone-cloud/cursor-ide-bin) (stable channel, bundled Electron)
 - [AUR submission guidelines](https://wiki.archlinux.org/title/AUR_submission_guidelines)
