@@ -6,7 +6,3 @@ pkg
 *.zst
 *.deb
 code.sh
-
-# Temporary test files
-PKGBUILD.backup
-PKGBUILD.test

@@ -1,0 +1,199 @@
+name: Update AUR Nightly Package
+
+on:
+  schedule:
+    - cron: "20 * * * *" # Run every hour at :20
+  workflow_dispatch:
+
+jobs:
+  check-and-update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get install -y libarchive-tools
+
+      - name: Check for updates and generate PKGBUILD.nightly
+        id: check
+        run: |
+          echo "::group::Checking nightly updates"
+
+          if [ -f PKGBUILD.nightly ]; then
+            current_pkgver=$(grep -E '^pkgver=' PKGBUILD.nightly | cut -d'=' -f2)
+            current_upstream_pkgver=$(grep -E '^_upstream_pkgver=' PKGBUILD.nightly | cut -d'=' -f2)
+            current_commit=$(grep -E '^_commit=' PKGBUILD.nightly | cut -d'=' -f2 | sed 's/ #.*//')
+          else
+            aur_pkgname="cursor-nightly-bin"
+            aur_pkgbuild_url="https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=${aur_pkgname}"
+            current_pkgbuild_file="/tmp/current_${aur_pkgname}_PKGBUILD"
+            if curl -fsSL "${aur_pkgbuild_url}" -o "${current_pkgbuild_file}"; then
+              current_pkgver=$(grep -E '^pkgver=' "${current_pkgbuild_file}" | cut -d'=' -f2)
+              current_upstream_pkgver=$(grep -E '^_upstream_pkgver=' "${current_pkgbuild_file}" | cut -d'=' -f2)
+              current_commit=$(grep -E '^_commit=' "${current_pkgbuild_file}" | cut -d'=' -f2 | sed 's/ #.*//')
+            else
+              current_pkgver="0.0.0"
+              current_upstream_pkgver=""
+              current_commit=""
+            fi
+          fi
+
+          [ -z "${current_pkgver}" ] && current_pkgver="0.0.0"
+          [ -z "${current_upstream_pkgver}" ] && current_upstream_pkgver="${current_pkgver}"
+          [ -z "${current_commit}" ] && current_commit=""
+          release_track="dev"
+          machine_hash="deadbeef"
+          probe_pkgver="0.0.0"
+          update_url="https://api2.cursor.sh/updates/api/update/linux-x64/cursor/${probe_pkgver}/${machine_hash}/${release_track}"
+
+          echo "Tracked version: ${current_pkgver}"
+          echo "Current commit: ${current_commit}"
+          echo "Probe version: ${probe_pkgver}"
+          echo "Track: ${release_track}"
+
+          response_file="/tmp/cursor_update_nightly.json"
+          status_code=$(curl -sS -o "${response_file}" -w "%{http_code}" "${update_url}")
+          echo "Track '${release_track}' returned HTTP ${status_code}"
+
+          if [ "${status_code}" = "204" ]; then
+            echo "No update needed. No nightly update is currently available."
+            echo "update_needed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          if [ "${status_code}" != "200" ]; then
+            echo "ERROR: Unexpected status from Cursor update API"
+            cat "${response_file}"
+            exit 1
+          fi
+
+          new_upstream_pkgver=$(jq -r '.version // empty' "${response_file}")
+          new_pkgver=$(echo "${new_upstream_pkgver}" | tr '-' '_')
+          appimage_url=$(jq -r '.url // empty' "${response_file}")
+          new_commit=$(echo "${appimage_url}" | sed -n 's|.*/production/\([^/]*\)/.*|\1|p')
+
+          if [ -z "${new_upstream_pkgver}" ] || [ -z "${new_pkgver}" ] || [ -z "${appimage_url}" ] || [ -z "${new_commit}" ]; then
+            echo "ERROR: Failed to parse version/url/commit from nightly response"
+            cat "${response_file}"
+            exit 1
+          fi
+
+          echo "Latest nightly: ${new_upstream_pkgver} (${new_commit:0:8})"
+          echo "Normalized pkgver: ${new_pkgver}"
+
+          if [ "${current_upstream_pkgver}" = "${new_upstream_pkgver}" ] && [ "${current_commit}" = "${new_commit}" ]; then
+            echo "No update needed. Tracked PKGBUILD already matches latest."
+            echo "update_needed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Update needed!"
+          echo "update_needed=true" >> $GITHUB_OUTPUT
+          echo "new_version=${new_pkgver}" >> $GITHUB_OUTPUT
+          echo "new_commit=${new_commit}" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+
+          echo "::group::Generating PKGBUILD.nightly"
+          deb_url="https://downloads.cursor.com/production/${new_commit}/linux/x64/deb/amd64/deb/cursor_${new_upstream_pkgver}_amd64.deb"
+          curl -sS "${deb_url}" -o /tmp/cursor_nightly.deb
+
+          new_sha=$(sha512sum /tmp/cursor_nightly.deb | cut -d ' ' -f 1)
+          code_version=$(bsdtar xOf /tmp/cursor_nightly.deb data.tar.xz | bsdtar xOf - ./usr/share/cursor/resources/app/product.json 2>/dev/null | jq -r .vscodeVersion)
+          _electron=electron
+
+          echo "VSCode version: ${code_version}"
+          echo "Electron: ${_electron}"
+
+          awk -v pkgver="${new_pkgver}" \
+              -v pkgver_upstream="${new_upstream_pkgver}" \
+              -v commit="${new_commit}" \
+              -v sha="${new_sha}" \
+              -v electron="${_electron}" \
+              'BEGIN {OFS=""}
+               /^pkgver=/ {print "pkgver=" pkgver; next}
+               /^_upstream_pkgver=/ {print "_upstream_pkgver=" pkgver_upstream; next}
+               /^_commit=/ {print "_commit=" commit; next}
+               /^sha512sums\[0\]=/ {print "sha512sums[0]=" sha; next}
+               /^_electron=/ {print "_electron=" electron; next}
+               {print}' PKGBUILD.nightly.sed > PKGBUILD.nightly
+
+          if ! grep -q "^pkgver=${new_pkgver}$" PKGBUILD.nightly; then
+            echo "ERROR: pkgver not set correctly"
+            exit 1
+          fi
+          if ! grep -q "^_upstream_pkgver=${new_upstream_pkgver}$" PKGBUILD.nightly; then
+            echo "ERROR: _upstream_pkgver not set correctly"
+            exit 1
+          fi
+          if ! grep -q "^_commit=${new_commit}" PKGBUILD.nightly; then
+            echo "ERROR: _commit not set correctly"
+            exit 1
+          fi
+          if ! grep -q "^_electron=${_electron}$" PKGBUILD.nightly; then
+            echo "ERROR: _electron not set correctly"
+            exit 1
+          fi
+          if ! grep -q "^sha512sums\[0\]=${new_sha}$" PKGBUILD.nightly; then
+            echo "ERROR: sha512sum not set correctly"
+            exit 1
+          fi
+
+          echo "✓ PKGBUILD.nightly generated and validated"
+          echo "::endgroup::"
+
+      - name: Notify if no update needed
+        if: steps.check.outputs.update_needed == 'false'
+        run: echo "No update needed. Stopping workflow."
+
+      - name: Commit channel PKGBUILD
+        if: steps.check.outputs.update_needed == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add PKGBUILD.nightly
+          git commit -m "Update nightly PKGBUILD to version ${{ steps.check.outputs.new_version }} (commit ${{ steps.check.outputs.new_commit }})" || echo "No changes to commit"
+          git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check branch and continue or stop workflow
+        if: steps.check.outputs.update_needed == 'true'
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/development" ]]; then
+            echo "On development branch, stopping workflow"
+            exit 0
+          else
+            echo "On main branch, continuing workflow"
+          fi
+
+      - name: Install SSH Key
+        if: steps.check.outputs.update_needed == 'true' && github.ref != 'refs/heads/development'
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          known_hosts: ${{ secrets.KNOWN_HOSTS }}
+          if_key_exists: replace
+
+      - name: Publish AUR package
+        if: steps.check.outputs.update_needed == 'true' && github.ref != 'refs/heads/development'
+        uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
+        with:
+          pkgname: cursor-nightly-bin
+          pkgbuild: ./PKGBUILD.nightly
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update nightly to version ${{ steps.check.outputs.new_version }} (commit ${{ steps.check.outputs.new_commit }})"
+          allow_empty_commits: false
+          ssh_keyscan_types: rsa,ecdsa,ed25519
+          assets: rg.sh
+
+      - name: Summary
+        run: |
+          echo "::group::Workflow Summary"
+          echo "Update needed: ${{ steps.check.outputs.update_needed }}"
+          echo "New version: ${{ steps.check.outputs.new_version }}"
+          echo "New commit: ${{ steps.check.outputs.new_commit }}"
+          echo "::endgroup::"
