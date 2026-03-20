@@ -6,7 +6,7 @@ CURSOR_USER_FLAGS=()
 if [[ -f "${XDG_CONFIG_HOME:-$HOME/.config}/cursor-flags.conf" ]]; then
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" =~ ^[[:space:]]*# ]] && continue
-    [[ -z "${line// }" ]] && continue
+    [[ "$line" =~ ^[[:space:]]*$ ]] && continue
     CURSOR_USER_FLAGS+=("$line")
   done < "${XDG_CONFIG_HOME:-$HOME/.config}/cursor-flags.conf"
 fi
