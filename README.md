@@ -1,14 +1,10 @@
-# AUR Cursor Pre-release Package Updater
+# AUR Cursor pre-release updater
 
-Automated maintenance for Cursor pre-release AUR packages.
+GitHub Actions workflows that track Cursor’s **early access** and **nightly** Linux builds and publish matching AUR packages.
 
-> [!IMPORTANT]
-> This fork only maintains:
-> - `cursor-early-access-bin`
-> - `cursor-nightly-bin`
->
-> Stable `cursor-bin` is maintained upstream by:
-> [Gunther-Schulz/aur-cursor-bin-updater](https://github.com/Gunther-Schulz/aur-cursor-bin-updater)
+> [!NOTE]
+> **In scope:** `cursor-early-access-bin` and `cursor-nightly-bin` on the AUR.  
+> **Out of scope:** stable-channel Cursor packaging (see the AUR for community options).
 
 ## Installing
 
@@ -22,7 +18,7 @@ yay -S cursor-nightly-bin
 
 Only one `provides=('cursor')` Cursor package should be installed at a time. These builds **conflict** with `cursor-bin`, [`cursor-ide-bin`](https://aur.archlinux.org/packages/cursor-ide-bin), and the sibling channel package (early access vs nightly).
 
-For stable `cursor-bin`, use the upstream package/repository. For stable Cursor with **bundled** Electron (similar to this repo’s approach), use [`cursor-ide-bin`](https://aur.archlinux.org/packages/cursor-ide-bin).
+For **stable** Cursor on Arch, pick an AUR package deliberately: `cursor-bin` (and similar) historically **substitute** system Electron/Node, while [`cursor-ide-bin`](https://aur.archlinux.org/packages/cursor-ide-bin) keeps the **bundled** runtime—closer to what this repository does for pre-release channels.
 
 ## Repository Layout
 
@@ -58,15 +54,23 @@ Channel `PKGBUILD` files are tracked in git for audit history:
 
 ## Packaging approach
 
-These packages install the official `.deb` **without** swapping in system Electron or Node (unlike typical `cursor-bin` packaging). That matches upstream’s tested runtime, avoids subtle breakage, and keeps process monitoring sane—same idea as [cursor-ide-bin](https://github.com/lone-cloud/cursor-ide-bin) / [`cursor-ide-bin` (AUR)](https://aur.archlinux.org/packages/cursor-ide-bin).
+These packages install the official `.deb` **without** swapping in system Electron or Node (unlike typical `cursor-bin`-style packaging). That matches upstream’s tested runtime, avoids subtle breakage, and keeps process monitoring sane—aligned with [cursor-ide-bin](https://github.com/lone-cloud/cursor-ide-bin) / [`cursor-ide-bin` (AUR)](https://aur.archlinux.org/packages/cursor-ide-bin).
 
 - **Runtime**: Electron and Node come from the upstream bundle; `ripgrep` is no longer replaced by a wrapper script (`rg.sh` was removed).
 - **Build**: `imagemagick` trims the pixmap icon; `chrome-sandbox` is set setuid when present.
 - **Flags**: optional Chromium/Electron flags via `~/.config/cursor-flags.conf` (one flag per line; see `cursor-launcher.sh`).
 - **License file**: the PKGBUILD installs `LICENSE.txt` from the usual path inside the `.deb`, or searches under `/usr/share/cursor` if it moves; if none is found, the build warns and continues.
 
+## Inspiration
+
+This repository is **not** a straight fork of either project below; it **combines** ideas from both:
+
+- **[lone-cloud/cursor-ide-bin](https://github.com/lone-cloud/cursor-ide-bin)** — bundled Electron, `.desktop` + launcher (`cursor-flags.conf`), ImageMagick icon trim, dependency set, and general “ship the `.deb` as upstream built it” philosophy.
+- **[Gunther-Schulz/aur-cursor-bin-updater](https://github.com/Gunther-Schulz/aur-cursor-bin-updater)** — automated PKGBUILD updates driven by Cursor’s API (a pattern this repo still uses for **channel** tracking). The **pre-release** packages here intentionally **do not** follow the system-`electron` split still common in `cursor-bin`-style recipes.
+
+Neither project above is responsible for this repo’s packages; mistakes or policy choices here are ours.
+
 ## Related
 
 - [Cursor IDE](https://www.cursor.com)
-- [cursor-ide-bin](https://github.com/lone-cloud/cursor-ide-bin) (stable channel, bundled Electron)
 - [AUR submission guidelines](https://wiki.archlinux.org/title/AUR_submission_guidelines)
