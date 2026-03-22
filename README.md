@@ -55,7 +55,9 @@ Run `bun scripts/update.ts --help` for additional flags.
 
 ## Packaging
 
-Installs the upstream `.deb` **without** replacing bundled Electron or Node—same general idea as [`cursor-ide-bin`](https://aur.archlinux.org/packages/cursor-ide-bin). Optional flags: `~/.config/cursor-flags.conf` (one flag per line; see `packaging/common/cursor-launcher.sh`). `chrome-sandbox` gets the setuid bit when present.
+The PKGBUILD unpacks Cursor’s upstream `.deb` and installs the application from that bundle.
+
+Optional Chromium flags: put one flag per line in `~/.config/cursor-flags.conf`. The launcher reads that file; see `packaging/common/cursor-launcher.sh`. If the package includes `chrome-sandbox`, it is installed with the setuid bit.
 
 ## Acknowledgments
 
