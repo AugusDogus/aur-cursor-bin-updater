@@ -165,12 +165,16 @@ jobs:
           known_hosts: ${{ secrets.KNOWN_HOSTS }}
           if_key_exists: replace
 
+      - name: Prepare PKGBUILD for AUR
+        if: steps.check.outputs.update_needed == 'true' && github.ref != 'refs/heads/development'
+        run: cp PKGBUILD.early-access /tmp/PKGBUILD
+
       - name: Publish AUR package
         if: steps.check.outputs.update_needed == 'true' && github.ref != 'refs/heads/development'
         uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
         with:
           pkgname: cursor-early-access-bin
-          pkgbuild: ./PKGBUILD.early-access
+          pkgbuild: /tmp/PKGBUILD
           commit_username: ${{ secrets.AUR_USERNAME }}
           commit_email: ${{ secrets.AUR_EMAIL }}
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
