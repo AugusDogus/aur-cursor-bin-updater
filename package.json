@@ -1,0 +1,9 @@
+{
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "commander": "^14.0.3",
+    "zod": "^4.3.6"
+  }
+}

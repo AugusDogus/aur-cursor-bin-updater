@@ -6,3 +6,5 @@ pkg
 *.zst
 *.deb
 code.sh
+node_modules
+.aur
