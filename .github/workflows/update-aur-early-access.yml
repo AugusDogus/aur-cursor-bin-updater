@@ -81,20 +81,10 @@ jobs:
 
       - name: Publish AUR package
         if: (steps.check.outputs.update_available == 'true' || inputs.force_publish) && github.ref != 'refs/heads/development'
-        uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
-        with:
-          pkgname: cursor-early-access-bin
-          pkgbuild: .aur/PKGBUILD
-          commit_username: ${{ secrets.AUR_USERNAME }}
-          commit_email: ${{ secrets.AUR_EMAIL }}
-          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "Update early-access to version ${{ steps.check.outputs.latest_version }} (commit ${{ steps.check.outputs.latest_commit }})"
-          allow_empty_commits: false
-          ssh_keyscan_types: rsa,ecdsa,ed25519
-          assets: |
-            .aur/.SRCINFO
-            .aur/cursor.desktop
-            .aur/cursor-launcher.sh
+        run: ./scripts/publish-aur.sh cursor-early-access-bin "Update early-access to version ${{ steps.check.outputs.latest_version }} (commit ${{ steps.check.outputs.latest_commit }})"
+        env:
+          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+          AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
 
       - name: Summary
         run: |
