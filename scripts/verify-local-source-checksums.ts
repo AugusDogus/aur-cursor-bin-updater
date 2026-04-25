@@ -9,6 +9,8 @@ import { parseSha512Sums, parseSourceEntries } from "./lib/pkgbuild";
 const usage =
   "Usage: bun scripts/verify-local-source-checksums.ts --pkgbuild <path> --source <path> [--source <path> ...]";
 
+class UsageError extends Error {}
+
 interface CliOptions {
   pkgbuildPath: string;
   sourcePaths: string[];
@@ -30,7 +32,7 @@ function parseCliOptions(args: string[]): CliOptions {
   try {
     program.parse(args, { from: "user" });
   } catch {
-    throw new Error(usage);
+    throw new UsageError(usage);
   }
 
   const options = program.opts<{
@@ -38,26 +40,35 @@ function parseCliOptions(args: string[]): CliOptions {
     source: string[];
   }>();
 
-  if (!options.pkgbuild || options.source.length === 0) {
-    throw new Error(usage);
-  }
+  return !options.pkgbuild || options.source.length === 0
+    ? (() => {
+        throw new UsageError(usage);
+      })()
+    : {
+        pkgbuildPath: options.pkgbuild,
+        sourcePaths: options.source,
+      };
+}
 
+function getSourceParts(sourceEntry: string) {
+  const parts = sourceEntry.split("::");
   return {
-    pkgbuildPath: options.pkgbuild,
-    sourcePaths: options.source,
+    filename: parts[0] ?? "",
+    location: parts.length > 1 ? parts.slice(1).join("::") : null,
   };
 }
 
 function isRemoteSource(sourceEntry: string) {
-  return (
-    sourceEntry.startsWith("http://") ||
-    sourceEntry.startsWith("https://") ||
-    sourceEntry.includes("::")
+  const { location } = getSourceParts(sourceEntry);
+  const candidate = location ?? sourceEntry;
+
+  return ["http://", "https://", "ftp://", "git+"].some((prefix) =>
+    candidate.startsWith(prefix),
   );
 }
 
 function getSourceFilename(sourceEntry: string) {
-  return basename(sourceEntry.includes("::") ? sourceEntry.split("::")[0] ?? sourceEntry : sourceEntry);
+  return basename(getSourceParts(sourceEntry).filename);
 }
 
 function buildLocalSourceIndex(sources: string[]) {
@@ -77,70 +88,67 @@ function buildLocalSourceIndex(sources: string[]) {
 }
 
 async function computeSha512(path: string) {
-  const content = await readFile(path);
-  return createHash("sha512").update(content).digest("hex");
+  return createHash("sha512").update(await readFile(path)).digest("hex");
 }
 
-async function main() {
-  const { pkgbuildPath, sourcePaths } = parseCliOptions(process.argv.slice(2));
-
+async function readSourceResult(sourcePath: string) {
   try {
-    await access(pkgbuildPath);
+    await access(sourcePath);
+    return { sourcePath, exists: true as const };
   } catch {
-    throw new Error(`Missing PKGBUILD: ${pkgbuildPath}`);
-  }
-
-  const [sources, expectedSums] = await Promise.all([
-    parseSourceEntries(pkgbuildPath),
-    parseSha512Sums(pkgbuildPath),
-  ]);
-  const localSourceIndex = buildLocalSourceIndex(sources);
-
-  let hasMismatch = false;
-
-  for (const sourcePath of sourcePaths) {
-    try {
-      await access(sourcePath);
-    } catch {
-      console.error(`Missing source file: ${sourcePath}`);
-      hasMismatch = true;
-      continue;
-    }
-
-    const filename = basename(sourcePath);
-    const sourceIndex = localSourceIndex.get(filename);
-    if (sourceIndex === undefined) {
-      console.error(`No local source entry found for ${sourcePath}`);
-      hasMismatch = true;
-      continue;
-    }
-
-    const expected = expectedSums[sourceIndex];
-    if (!expected) {
-      console.error(`Missing sha512sums entry ${sourceIndex} for ${sourcePath}`);
-      hasMismatch = true;
-      continue;
-    }
-
-    const actual = await computeSha512(sourcePath);
-    if (expected === actual) continue;
-
-    console.error(`Checksum mismatch for ${sourcePath}`);
-    console.error(`  expected: ${expected}`);
-    console.error(`  actual:   ${actual}`);
-    hasMismatch = true;
-  }
-
-  if (hasMismatch) {
-    process.exit(1);
+    return { sourcePath, exists: false as const };
   }
 }
+
+const { pkgbuildPath, sourcePaths } = parseCliOptions(process.argv.slice(2));
 
 try {
-  await main();
-} catch (error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  if (message === usage) console.error(usage);
-  else console.error(message);
+  await access(pkgbuildPath);
+} catch {
+  throw new Error(`Missing PKGBUILD: ${pkgbuildPath}`);
+}
+
+const [sources, expectedSums, sourceResults] = await Promise.all([
+  parseSourceEntries(pkgbuildPath),
+  parseSha512Sums(pkgbuildPath),
+  Promise.all(sourcePaths.map(readSourceResult)),
+]);
+const localSourceIndex = buildLocalSourceIndex(sources);
+
+const failureMessages = (
+  await Promise.all(
+    sourceResults.map(async (sourceResult) => {
+      if (!sourceResult.exists) {
+        return [`Missing source file: ${sourceResult.sourcePath}`];
+      }
+
+      const sourceIndex = localSourceIndex.get(basename(sourceResult.sourcePath));
+      if (sourceIndex === undefined) {
+        return [`No local source entry found for ${sourceResult.sourcePath}`];
+      }
+
+      const expected = expectedSums[sourceIndex];
+      if (!expected) {
+        return [
+          `Missing sha512sums entry ${sourceIndex} for ${sourceResult.sourcePath}`,
+        ];
+      }
+
+      const actual = await computeSha512(sourceResult.sourcePath);
+      return expected === actual
+        ? []
+        : [
+            `Checksum mismatch for ${sourceResult.sourcePath}`,
+            `  expected: ${expected}`,
+            `  actual:   ${actual}`,
+          ];
+    }),
+  )
+).flat();
+
+if (failureMessages.length > 0) {
+  console.error(failureMessages.join("\n"));
   process.exit(1);
 }
+
+process.exit(0);
