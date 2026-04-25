@@ -65,12 +65,10 @@ jobs:
 
       - name: Prepare PKGBUILD for AUR
         if: (steps.check.outputs.update_available == 'true' || inputs.force_publish) && github.ref != 'refs/heads/development'
-        run: |
-          mkdir -p .aur
-          cp packaging/nightly/PKGBUILD .aur/PKGBUILD
-          cp packaging/common/cursor.desktop packaging/common/cursor-launcher.sh .aur/
-          ./scripts/verify-local-source-checksums.sh .aur/PKGBUILD .aur/cursor.desktop .aur/cursor-launcher.sh
-          bun scripts/update.ts --srcinfo --channel nightly --pkgbuild .aur/PKGBUILD --srcinfo-path .aur/.SRCINFO
+        uses: ./.github/actions/prepare-aur
+        with:
+          channel: nightly
+          pkgbuild-path: packaging/nightly/PKGBUILD
 
       - name: Install SSH Key
         if: (steps.check.outputs.update_available == 'true' || inputs.force_publish) && github.ref != 'refs/heads/development'
