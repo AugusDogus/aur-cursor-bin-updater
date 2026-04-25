@@ -106,6 +106,29 @@ function parseArrayField(lines: string[], fieldName: string) {
   }, [] as string[]);
 }
 
+function parseIndexedFieldOverrides(
+  lines: string[],
+  fieldName: string,
+  variables: Record<string, string>,
+) {
+  return lines.reduce((overrides, line) => {
+    const trimmed = line.trim();
+    const match = trimmed.match(
+      new RegExp(`^${fieldName}\\[(\\d+)\\]=(.+)$`),
+    );
+    if (!match) return overrides;
+
+    const index = Number.parseInt(match[1] ?? "", 10);
+    const rawValue = match[2] ?? "";
+    if (Number.isNaN(index)) return overrides;
+
+    return overrides.set(
+      index,
+      expandVariables(trimOuterQuotes(stripInlineComment(rawValue)), variables),
+    );
+  }, new Map<number, string>());
+}
+
 function expandVariables(input: string, variables: Record<string, string>) {
   return Object.entries(variables).reduce(
     (value, [key, replacement]) =>
@@ -119,6 +142,46 @@ function trimOuterQuotes(input: string) {
   if (input.startsWith("'") && input.endsWith("'")) return input.slice(1, -1);
   if (input.startsWith('"') && input.endsWith('"')) return input.slice(1, -1);
   return input;
+}
+
+function getPkgbuildVariables(lines: string[]) {
+  const pkgver = getScalarValue(lines, "pkgver") ?? "";
+  const upstreamPkgver = getScalarValue(lines, "_upstream_pkgver") ?? pkgver;
+  const commit = stripInlineComment(getScalarValue(lines, "_commit") ?? "");
+
+  return {
+    pkgver,
+    _upstream_pkgver: upstreamPkgver,
+    _commit: commit,
+  };
+}
+
+function getExpandedArrayField(
+  lines: string[],
+  fieldName: string,
+  variables: Record<string, string>,
+) {
+  return parseArrayField(lines, fieldName).map((item) =>
+    expandVariables(item, variables),
+  );
+}
+
+function getExpandedArrayFieldWithOverrides(
+  lines: string[],
+  fieldName: string,
+  variables: Record<string, string>,
+) {
+  const values = [...getExpandedArrayField(lines, fieldName, variables)];
+
+  for (const [index, value] of parseIndexedFieldOverrides(
+    lines,
+    fieldName,
+    variables,
+  )) {
+    values[index] = value;
+  }
+
+  return values;
 }
 
 export async function parseCurrentVersion(
@@ -138,6 +201,20 @@ export async function parseCurrentVersion(
     upstreamPkgver: upstream ?? pkgver,
     commit: stripInlineComment(commitRaw),
   });
+}
+
+export async function parseSourceEntries(pkgbuildPath: string) {
+  const lines = (await file(pkgbuildPath).text()).split("\n");
+  return getExpandedArrayField(lines, "source", getPkgbuildVariables(lines));
+}
+
+export async function parseSha512Sums(pkgbuildPath: string) {
+  const lines = (await file(pkgbuildPath).text()).split("\n");
+  return getExpandedArrayFieldWithOverrides(
+    lines,
+    "sha512sums",
+    getPkgbuildVariables(lines),
+  );
 }
 
 export async function updatePkgbuild(
@@ -216,10 +293,8 @@ export async function generateSrcinfo(pkgbuildPath: string) {
   const text = await file(pkgbuildPath).text();
   const lines = text.split("\n");
 
-  const pkgver = getScalarValue(lines, "pkgver") ?? "";
-  const upstreamPkgver = getScalarValue(lines, "_upstream_pkgver") ?? pkgver;
-  const commit = stripInlineComment(getScalarValue(lines, "_commit") ?? "");
-  const vars = { pkgver, _upstream_pkgver: upstreamPkgver, _commit: commit };
+  const vars = getPkgbuildVariables(lines);
+  const pkgver = vars.pkgver;
 
   const pkgname = getScalarValue(lines, "pkgname") ?? "";
   const pkgrel = getScalarValue(lines, "pkgrel") ?? "";
@@ -227,7 +302,7 @@ export async function generateSrcinfo(pkgbuildPath: string) {
   const url = trimOuterQuotes(getScalarValue(lines, "url") ?? "");
 
   const expandArray = (field: string) =>
-    parseArrayField(lines, field).map((item) => expandVariables(item, vars));
+    getExpandedArrayField(lines, field, vars);
 
   const fields: Record<string, string[]> = {
     arch: expandArray("arch"),
@@ -240,7 +315,7 @@ export async function generateSrcinfo(pkgbuildPath: string) {
     noextract: expandArray("noextract"),
     options: expandArray("options"),
     source: expandArray("source"),
-    sha512sums: expandArray("sha512sums"),
+    sha512sums: getExpandedArrayFieldWithOverrides(lines, "sha512sums", vars),
   };
 
   const out = [

@@ -1,0 +1,37 @@
+name: Prepare AUR artifacts
+description: Stage PKGBUILD files for AUR publishing and validate local source checksums
+
+inputs:
+  channel:
+    description: Release channel name used for .SRCINFO generation
+    required: true
+  pkgbuild-path:
+    description: Source PKGBUILD path to copy into the .aur staging directory
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Stage AUR files
+      shell: bash
+      run: |
+        mkdir -p .aur
+        cp "${{ inputs.pkgbuild-path }}" .aur/PKGBUILD
+        cp packaging/common/cursor.desktop packaging/common/cursor-launcher.sh .aur/
+
+    - name: Verify local source checksums
+      shell: bash
+      run: |
+        bun scripts/verify-local-source-checksums.ts \
+          --pkgbuild .aur/PKGBUILD \
+          --source .aur/cursor.desktop \
+          --source .aur/cursor-launcher.sh
+
+    - name: Generate .SRCINFO
+      shell: bash
+      run: |
+        bun scripts/update.ts \
+          --srcinfo \
+          --channel "${{ inputs.channel }}" \
+          --pkgbuild .aur/PKGBUILD \
+          --srcinfo-path .aur/.SRCINFO
