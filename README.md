@@ -57,7 +57,7 @@ Run `bun scripts/update.ts --help` for additional flags.
 
 The PKGBUILD unpacks Cursor’s upstream `.deb` and installs the application from that bundle.
 
-Optional Chromium flags: put one flag per line in `~/.config/cursor-flags.conf`. The launcher reads that file; see `packaging/common/cursor-launcher.sh`. If the package includes `chrome-sandbox`, it is installed with the setuid bit.
+Optional Chromium flags: put one flag per line in `~/.config/cursor-flags.conf`. The launcher reads that file and passes the flags through to Cursor’s upstream CLI; see `packaging/common/cursor-launcher.sh`. If the package includes `chrome-sandbox`, it is installed with the setuid bit.
 
 ## Acknowledgments
 
