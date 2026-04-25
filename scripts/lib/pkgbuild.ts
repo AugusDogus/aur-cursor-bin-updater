@@ -106,25 +106,45 @@ function parseArrayField(lines: string[], fieldName: string) {
   }, [] as string[]);
 }
 
+function parseIndexedAssignment(line: string, fieldName: string) {
+  const trimmed = line.trim();
+  const prefix = `${fieldName}[`;
+  if (!trimmed.startsWith(prefix)) return null;
+
+  const closeBracketIndex = trimmed.indexOf("]", prefix.length);
+  if (closeBracketIndex < 0 || trimmed[closeBracketIndex + 1] !== "=") return null;
+
+  const indexText = trimmed.slice(prefix.length, closeBracketIndex);
+  if (
+    indexText.length === 0 ||
+    ![...indexText].every((char) => char >= "0" && char <= "9")
+  ) {
+    return null;
+  }
+
+  return {
+    index: Number.parseInt(indexText, 10),
+    rawValue: trimmed.slice(closeBracketIndex + 2),
+  };
+}
+
 function parseIndexedFieldOverrides(
   lines: string[],
   fieldName: string,
   variables: Record<string, string>,
 ) {
   return lines.reduce((overrides, line) => {
-    const trimmed = line.trim();
-    const match = trimmed.match(
-      new RegExp(`^${fieldName}\\[(\\d+)\\]=(.+)$`),
-    );
-    if (!match) return overrides;
+    const assignment = parseIndexedAssignment(line, fieldName);
+    if (!assignment) return overrides;
 
-    const index = Number.parseInt(match[1] ?? "", 10);
-    const rawValue = match[2] ?? "";
-    if (Number.isNaN(index)) return overrides;
-
+    // Indexed overrides run stripInlineComment -> trimOuterQuotes -> expandVariables,
+    // so unlike parseShellWords single quotes do not suppress expansion here.
     return overrides.set(
-      index,
-      expandVariables(trimOuterQuotes(stripInlineComment(rawValue)), variables),
+      assignment.index,
+      expandVariables(
+        trimOuterQuotes(stripInlineComment(assignment.rawValue)),
+        variables,
+      ),
     );
   }, new Map<number, string>());
 }
@@ -178,6 +198,12 @@ function getExpandedArrayFieldWithOverrides(
     fieldName,
     variables,
   )) {
+    if (index >= values.length) {
+      throw new Error(
+        `Invalid ${fieldName}[${index}] override: array has ${values.length} entries`,
+      );
+    }
+
     values[index] = value;
   }
 
@@ -205,7 +231,11 @@ export async function parseCurrentVersion(
 
 export async function parseSourceEntries(pkgbuildPath: string) {
   const lines = (await file(pkgbuildPath).text()).split("\n");
-  return getExpandedArrayField(lines, "source", getPkgbuildVariables(lines));
+  return getExpandedArrayFieldWithOverrides(
+    lines,
+    "source",
+    getPkgbuildVariables(lines),
+  );
 }
 
 export async function parseSha512Sums(pkgbuildPath: string) {
