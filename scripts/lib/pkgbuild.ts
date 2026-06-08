@@ -250,7 +250,7 @@ export async function parseSha512Sums(pkgbuildPath: string) {
 export async function updatePkgbuild(
   pkgbuildPath: string,
   latest: LatestVersion,
-  newSha512: string,
+  newSha512: { amd64: string; arm64: string },
 ) {
   const lines = (await file(pkgbuildPath).text()).split("\n");
   const reduced = lines.reduce(
@@ -279,11 +279,17 @@ export async function updatePkgbuild(
           lines: [...state.lines, `_commit=${latest.commit}`],
           sawCommit: true,
         };
-      if (trimmed.startsWith("sha512sums[0]="))
+      if (trimmed.startsWith("sha512sums_x86_64[0]="))
         return {
           ...state,
-          lines: [...state.lines, `sha512sums[0]=${newSha512}`],
-          sawSha: true,
+          lines: [...state.lines, `sha512sums_x86_64[0]=${newSha512.amd64}`],
+          sawShaAmd64: true,
+        };
+      if (trimmed.startsWith("sha512sums_aarch64[0]="))
+        return {
+          ...state,
+          lines: [...state.lines, `sha512sums_aarch64[0]=${newSha512.arm64}`],
+          sawShaArm64: true,
         };
       return {
         ...state,
@@ -295,12 +301,20 @@ export async function updatePkgbuild(
       sawPkgver: false,
       sawUpstreamPkgver: false,
       sawCommit: false,
-      sawSha: false,
+      sawShaAmd64: false,
+      sawShaArm64: false,
     },
   );
 
-  if (!reduced.sawPkgver || !reduced.sawCommit || !reduced.sawSha)
-    throw new Error("Missing one of pkgver/_commit/sha512sums[0] in PKGBUILD");
+  if (
+    !reduced.sawPkgver ||
+    !reduced.sawCommit ||
+    !reduced.sawShaAmd64 ||
+    !reduced.sawShaArm64
+  )
+    throw new Error(
+      "Missing one of pkgver/_commit/sha512sums_x86_64[0]/sha512sums_aarch64[0] in PKGBUILD",
+    );
 
   const finalLines = !reduced.sawUpstreamPkgver
     ? (() => {
@@ -334,6 +348,24 @@ export async function generateSrcinfo(pkgbuildPath: string) {
   const expandArray = (field: string) =>
     getExpandedArrayField(lines, field, vars);
 
+  const archSpecificFields = ["x86_64", "aarch64"].flatMap((arch) => {
+    const suffix = arch === "x86_64" ? "x86_64" : "aarch64";
+    return [
+      {
+        field: `source_${suffix}`,
+        values: expandArray(`source_${suffix}`),
+      },
+      {
+        field: `sha512sums_${suffix}`,
+        values: getExpandedArrayFieldWithOverrides(
+          lines,
+          `sha512sums_${suffix}`,
+          vars,
+        ),
+      },
+    ];
+  });
+
   const fields: Record<string, string[]> = {
     arch: expandArray("arch"),
     license: expandArray("license"),
@@ -355,6 +387,9 @@ export async function generateSrcinfo(pkgbuildPath: string) {
     `\tpkgrel = ${pkgrel}`,
     `\turl = ${url}`,
     ...Object.entries(fields).flatMap(([field, values]) =>
+      values.map((value) => `\t${field} = ${value}`),
+    ),
+    ...archSpecificFields.flatMap(({ field, values }) =>
       values.map((value) => `\t${field} = ${value}`),
     ),
     "",
