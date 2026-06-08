@@ -52,8 +52,16 @@ try {
     process.exit(2);
   }
 
-  const sha512 = options.skipChecksum ? "SKIP" : await computeDebSha512(latest);
-  await updatePkgbuild(options.pkgbuildPath, latest, sha512);
+  const [sha512Amd64, sha512Arm64] = options.skipChecksum
+    ? (["SKIP", "SKIP"] as const)
+    : await Promise.all([
+        computeDebSha512(latest, "amd64"),
+        computeDebSha512(latest, "arm64"),
+      ]);
+  await updatePkgbuild(options.pkgbuildPath, latest, {
+    amd64: sha512Amd64,
+    arm64: sha512Arm64,
+  });
   console.error(
     `Updated ${options.pkgbuildPath} -> ${latest.upstreamPkgver} (${latest.commit.slice(0, 8)})`,
   );

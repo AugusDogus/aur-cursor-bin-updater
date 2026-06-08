@@ -13,8 +13,9 @@ function extractCommitFromDownloadUrl(downloadUrl: string) {
   return segments[productionIndex + 1] ?? "";
 }
 
-function createDebUrl(latest: LatestVersion) {
-  return `https://downloads.cursor.com/production/${latest.commit}/linux/x64/deb/amd64/deb/cursor_${latest.upstreamPkgver}_amd64.deb`;
+function createDebUrl(latest: LatestVersion, arch: "amd64" | "arm64") {
+  const platform = arch === "amd64" ? "x64" : "arm64";
+  return `https://downloads.cursor.com/production/${latest.commit}/linux/${platform}/deb/${arch}/deb/cursor_${latest.upstreamPkgver}_${arch}.deb`;
 }
 
 async function digestStream(reader: any, hash: CryptoHasher): Promise<string> {
@@ -52,8 +53,11 @@ export async function getLatestVersion(channel: ChannelConfig) {
   });
 }
 
-export async function computeDebSha512(latest: LatestVersion) {
-  const response = await fetch(createDebUrl(latest), {
+export async function computeDebSha512(
+  latest: LatestVersion,
+  arch: "amd64" | "arm64" = "amd64",
+) {
+  const response = await fetch(createDebUrl(latest, arch), {
     headers: { "User-Agent": USER_AGENT },
     signal: AbortSignal.timeout(300_000),
   });
