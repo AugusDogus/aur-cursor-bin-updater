@@ -40,6 +40,12 @@ bun scripts/update.ts --update --channel nightly
 bun scripts/update.ts --srcinfo --channel early-access
 ```
 
+`--check` returns a discriminated JSON result. The release state is in
+`publication.status`; `publication.latest` exists only when an aligned,
+downloadable update is available. This replaces the former flat
+`update_available` and `latest_*` fields, so scripts consuming the old JSON
+shape must migrate to `current` and `publication`.
+
 Run `bun scripts/update.ts --help` for additional flags.
 
 ## Repository layout

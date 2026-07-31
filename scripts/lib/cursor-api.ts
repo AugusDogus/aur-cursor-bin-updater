@@ -15,18 +15,24 @@ export type CursorFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
-type UnavailableArtifact = {
+type ArtifactAvailability =
+  | {
+      status: "available";
+    }
+  | {
+      status: "unavailable";
+      url: string;
+      reason: string;
+    };
+type ReportedUnavailableArtifact = {
+  architecture: ArchitectureDescriptor;
   url: string;
   reason: string;
 };
 
-type ReportedUnavailableArtifact = UnavailableArtifact & {
-  architecture: ArchitectureDescriptor;
-};
-
 type NonEmptyArray<Value> = readonly [Value, ...Value[]];
 type ArchitectureReleases = ArchitectureValues<LatestVersion | null>;
-type ArtifactChecks = ArchitectureValues<UnavailableArtifact | null>;
+type ArtifactChecks = ArchitectureValues<ArtifactAvailability>;
 
 const latestReleaseBrand = Symbol("LatestRelease");
 interface LatestReleaseBrand {
@@ -64,56 +70,83 @@ function brandLatestRelease<State extends LatestReleaseState>(
   return Object.assign(state, { [latestReleaseBrand]: brandValue });
 }
 
-export const LatestRelease = {
-  fromArchitectureResults(
-    releases: ArchitectureReleases,
-    artifactChecks: ArtifactChecks,
-  ): LatestRelease {
-    const x86_64 = releases.x86_64;
-    const aarch64 = releases.aarch64;
-    if (x86_64 === null && aarch64 === null) {
-      return brandLatestRelease({
-        status: "unavailable",
-        releases: { x86_64: null, aarch64: null },
-      });
-    }
-    if (
-      x86_64 === null ||
-      aarch64 === null ||
-      x86_64.upstreamPkgver !== aarch64.upstreamPkgver ||
-      x86_64.commit !== aarch64.commit
-    ) {
-      return brandLatestRelease({
-        status: "architecture-mismatch",
-        releases,
-      });
-    }
+type ReleaseAlignment =
+  | Extract<LatestRelease, { status: "unavailable" | "architecture-mismatch" }>
+  | {
+      status: "aligned";
+      latest: LatestVersion;
+      releases: ArchitectureValues<LatestVersion>;
+    };
 
-    const alignedReleases = { x86_64, aarch64 };
-    const unavailableArtifacts = Architecture.all.flatMap((architecture) => {
-      const artifact = artifactChecks[architecture.pkgbuild];
-      return artifact ? [{ architecture, ...artifact }] : [];
-    });
-    const [firstUnavailableArtifact, ...remainingUnavailableArtifacts] =
-      unavailableArtifacts;
-    if (firstUnavailableArtifact) {
-      return brandLatestRelease({
-        status: "artifact-unavailable",
-        latest: x86_64,
-        releases: alignedReleases,
-        artifacts: [
-          firstUnavailableArtifact,
-          ...remainingUnavailableArtifacts,
-        ],
-      });
-    }
-
+function alignArchitectureReleases(
+  releases: ArchitectureReleases,
+): ReleaseAlignment {
+  const x86_64 = releases.x86_64;
+  const aarch64 = releases.aarch64;
+  if (x86_64 === null && aarch64 === null) {
     return brandLatestRelease({
-      status: "available",
-      latest: x86_64,
-      releases: alignedReleases,
+      status: "unavailable",
+      releases: { x86_64: null, aarch64: null },
     });
-  },
+  }
+  if (
+    x86_64 === null ||
+    aarch64 === null ||
+    x86_64.upstreamPkgver !== aarch64.upstreamPkgver ||
+    x86_64.pkgver !== aarch64.pkgver ||
+    x86_64.commit !== aarch64.commit
+  ) {
+    return brandLatestRelease({
+      status: "architecture-mismatch",
+      releases,
+    });
+  }
+
+  return {
+    status: "aligned",
+    latest: x86_64,
+    releases: { x86_64, aarch64 },
+  };
+}
+
+function finalizeArtifactChecks(
+  alignment: Extract<ReleaseAlignment, { status: "aligned" }>,
+  artifactChecks: ArtifactChecks,
+): LatestRelease {
+  const unavailableArtifacts = Architecture.all.flatMap((architecture) => {
+    const artifact = artifactChecks[architecture.pkgbuild];
+    return artifact.status === "unavailable"
+      ? [
+          {
+            architecture,
+            url: artifact.url,
+            reason: artifact.reason,
+          },
+        ]
+      : [];
+  });
+  const [firstUnavailableArtifact, ...remainingUnavailableArtifacts] =
+    unavailableArtifacts;
+  if (firstUnavailableArtifact) {
+    return brandLatestRelease({
+      status: "artifact-unavailable",
+      latest: alignment.latest,
+      releases: alignment.releases,
+      artifacts: [
+        firstUnavailableArtifact,
+        ...remainingUnavailableArtifacts,
+      ],
+    });
+  }
+
+  return brandLatestRelease({
+    status: "available",
+    latest: alignment.latest,
+    releases: alignment.releases,
+  });
+}
+
+export const LatestRelease = {
   message(release: LatestRelease) {
     switch (release.status) {
       case "available":
@@ -203,7 +236,7 @@ async function checkDebAvailability(
   latest: LatestVersion,
   architecture: ArchitectureDescriptor,
   fetcher: CursorFetch,
-): Promise<UnavailableArtifact | null> {
+): Promise<ArtifactAvailability> {
   const url = createDebUrl(latest, architecture);
 
   try {
@@ -213,13 +246,15 @@ async function checkDebAvailability(
       signal: AbortSignal.timeout(30_000),
     });
     return response.ok
-      ? null
+      ? { status: "available" }
       : {
+          status: "unavailable",
           url,
           reason: `HTTP ${response.status}`,
         };
   } catch (error: unknown) {
     return {
+      status: "unavailable",
       url,
       reason: error instanceof Error ? error.message : String(error),
     };
@@ -234,18 +269,15 @@ export async function getLatestRelease(
     async (architecture) =>
       await getLatestVersion(channel, architecture, fetcher),
   );
-  const metadataRelease = LatestRelease.fromArchitectureResults(releases, {
-    x86_64: null,
-    aarch64: null,
-  });
-  if (metadataRelease.status !== "available") return metadataRelease;
+  const alignment = alignArchitectureReleases(releases);
+  if (alignment.status !== "aligned") return alignment;
 
   const artifactChecks = await Architecture.mapValues(
     async (architecture) =>
-      await checkDebAvailability(metadataRelease.latest, architecture, fetcher),
+      await checkDebAvailability(alignment.latest, architecture, fetcher),
   );
 
-  return LatestRelease.fromArchitectureResults(releases, artifactChecks);
+  return finalizeArtifactChecks(alignment, artifactChecks);
 }
 
 export async function computeDebSha512(

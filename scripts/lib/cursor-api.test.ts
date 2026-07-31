@@ -13,6 +13,7 @@ import {
 const channel: ChannelConfig = {
   releaseTrack: "dev",
   defaultPkgbuild: "PKGBUILD",
+  aurPackage: "cursor-nightly-bin",
 };
 
 const commit = "0123456789abcdef0123456789abcdef01234567";

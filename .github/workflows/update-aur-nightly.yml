@@ -18,7 +18,5 @@ jobs:
     uses: ./.github/workflows/update-aur.yml
     with:
       channel: nightly
-      pkgbuild_path: packaging/nightly/PKGBUILD
-      aur_package: cursor-nightly-bin
       force_publish: ${{ inputs.force_publish }}
     secrets: inherit

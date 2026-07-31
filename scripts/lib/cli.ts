@@ -27,6 +27,30 @@ function parseChannel(rawChannel: string) {
   return parsed.data;
 }
 
+function parseMode(options: {
+  check?: boolean;
+  update?: boolean;
+  prepare?: boolean;
+  srcinfo?: boolean;
+}): CliOptions["mode"] {
+  const selectedModes: CliOptions["mode"][] = [];
+  if (options.check) selectedModes.push("check");
+  if (options.update) selectedModes.push("update");
+  if (options.prepare) selectedModes.push("prepare");
+  if (options.srcinfo) selectedModes.push("srcinfo");
+
+  if (selectedModes.length === 0) throw new Error(usage);
+  if (selectedModes.length > 1) {
+    throw new Error(
+      "Choose exactly one mode: --check, --update, --prepare, or --srcinfo",
+    );
+  }
+
+  const [mode] = selectedModes;
+  if (mode === undefined) throw new Error(usage);
+  return mode;
+}
+
 export function parseCliOptions(args: string[]): CliOptions {
   const program = new Command()
     .name("scripts/update.ts")
@@ -59,19 +83,12 @@ export function parseCliOptions(args: string[]): CliOptions {
     skipChecksum?: boolean;
     forcePublish?: boolean;
   }>();
-  const selectedModes = [
-    options.check ? "check" : null,
-    options.update ? "update" : null,
-    options.prepare ? "prepare" : null,
-    options.srcinfo ? "srcinfo" : null,
-  ].filter((value) => value !== null);
-  if (selectedModes.length === 0) throw new Error(usage);
-  if (selectedModes.length > 1)
-    throw new Error("Choose exactly one mode: --check, --update, or --srcinfo");
-
-  const mode = selectedModes[0] as CliOptions["mode"];
+  const mode = parseMode(options);
   const channel = parseChannel(options.channel);
   const channelConfig = getChannelConfig(channel);
+  if (mode === "prepare" && options.pkgbuild !== undefined) {
+    throw new Error("--prepare uses the selected channel's canonical PKGBUILD");
+  }
   const pkgbuildPath = options.pkgbuild ?? channelConfig.defaultPkgbuild;
   const srcinfoPath =
     options.srcinfoPath ?? `${dirname(pkgbuildPath)}/.SRCINFO`;

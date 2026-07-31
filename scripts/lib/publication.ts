@@ -1,6 +1,7 @@
 import type {
   CurrentVersion,
   LatestVersion,
+  PreparationPlanDto,
   PublicationDecision as PublicationDecisionValue,
 } from "../schemas";
 import {
@@ -13,7 +14,7 @@ type NonUpdatePublicationDecision = Exclude<
   { status: "update-available" }
 >;
 
-export type PublicationPlan =
+export type PublicationExecution =
   | {
       status: "skip";
       publication: NonUpdatePublicationDecision;
@@ -36,6 +37,10 @@ function summarizeVersion(
     upstream_pkgver: version.upstreamPkgver,
     commit: version.commit,
   };
+}
+
+function unreachable(value: never): never {
+  throw new Error(`Unhandled publication execution: ${JSON.stringify(value)}`);
 }
 
 export const PublicationDecision = {
@@ -71,12 +76,12 @@ export const PublicationDecision = {
   },
 } as const;
 
-export const PublicationPlan = {
+export const PublicationExecution = {
   fromRelease(
     current: CurrentVersion,
     release: LatestReleaseValue,
     forcePublish: boolean,
-  ): PublicationPlan {
+  ): PublicationExecution {
     if (forcePublish) {
       return {
         status: "publish-current",
@@ -98,5 +103,26 @@ export const PublicationPlan = {
       latest: release.latest,
       package: summarizeVersion(release.latest),
     };
+  },
+  toDto(execution: PublicationExecution): PreparationPlanDto {
+    switch (execution.status) {
+      case "skip":
+        return {
+          status: "skip",
+          publication: execution.publication,
+        };
+      case "publish-current":
+        return {
+          status: "publish-current",
+          package: execution.package,
+        };
+      case "update-and-publish":
+        return {
+          status: "update-and-publish",
+          package: execution.package,
+        };
+      default:
+        return unreachable(execution);
+    }
   },
 } as const;

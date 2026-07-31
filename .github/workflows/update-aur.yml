@@ -7,14 +7,6 @@ on:
         description: Cursor release channel
         required: true
         type: string
-      pkgbuild_path:
-        description: Channel PKGBUILD path
-        required: true
-        type: string
-      aur_package:
-        description: AUR package name
-        required: true
-        type: string
       force_publish:
         description: Publish the current PKGBUILD even when no update is available
         required: false
@@ -24,6 +16,11 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Serialize both channels so repository and AUR state cannot be reordered.
+  group: aur-publication-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   prepare:
     runs-on: ubuntu-24.04
@@ -31,6 +28,8 @@ jobs:
       plan_status: ${{ steps.prepare.outputs.plan_status }}
       package_version: ${{ steps.prepare.outputs.package_version }}
       package_commit: ${{ steps.prepare.outputs.package_commit }}
+      pkgbuild_path: ${{ steps.prepare.outputs.pkgbuild_path }}
+      aur_package: ${{ steps.prepare.outputs.aur_package }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,13 +49,11 @@ jobs:
         env:
           CHANNEL: ${{ inputs.channel }}
           FORCE_PUBLISH: ${{ inputs.force_publish }}
-          PKGBUILD_PATH: ${{ inputs.pkgbuild_path }}
         run: |
           prepare_args=(
             scripts/update.ts
             --prepare
             --channel "$CHANNEL"
-            --pkgbuild "$PKGBUILD_PATH"
           )
           if [[ "$FORCE_PUBLISH" == "true" ]]; then
             prepare_args+=(--force-publish)
@@ -65,7 +62,13 @@ jobs:
           cat preparation_result.json
 
           plan_status=$(jq -er '.plan.status' preparation_result.json)
-          echo "plan_status=$plan_status" >> "$GITHUB_OUTPUT"
+          pkgbuild_path=$(jq -er '.target.pkgbuild_path' preparation_result.json)
+          aur_package=$(jq -er '.target.aur_package' preparation_result.json)
+          {
+            echo "plan_status=$plan_status"
+            echo "pkgbuild_path=$pkgbuild_path"
+            echo "aur_package=$aur_package"
+          } >> "$GITHUB_OUTPUT"
 
           case "$plan_status" in
             skip)
@@ -78,7 +81,7 @@ jobs:
                 echo "package_commit=$package_commit"
               } >> "$GITHUB_OUTPUT"
               mkdir -p validated
-              cp "$PKGBUILD_PATH" validated/PKGBUILD
+              cp "$pkgbuild_path" validated/PKGBUILD
               ;;
             *)
               echo "Unknown publication plan: $plan_status" >&2
@@ -171,30 +174,15 @@ jobs:
 
       - name: Restore validated PKGBUILD
         env:
-          PKGBUILD_PATH: ${{ inputs.pkgbuild_path }}
+          PKGBUILD_PATH: ${{ needs.prepare.outputs.pkgbuild_path }}
         run: cp validated/PKGBUILD "$PKGBUILD_PATH"
-
-      - name: Commit channel PKGBUILD
-        if: needs.prepare.outputs.plan_status == 'update-and-publish'
-        env:
-          CHANNEL: ${{ inputs.channel }}
-          PACKAGE_COMMIT: ${{ needs.prepare.outputs.package_commit }}
-          PACKAGE_VERSION: ${{ needs.prepare.outputs.package_version }}
-          PKGBUILD_PATH: ${{ inputs.pkgbuild_path }}
-          TARGET_REF: ${{ github.ref_name }}
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add "$PKGBUILD_PATH"
-          git commit -m "Update $CHANNEL PKGBUILD to version $PACKAGE_VERSION (commit $PACKAGE_COMMIT)"
-          git push origin "HEAD:$TARGET_REF"
 
       - name: Prepare PKGBUILD for AUR
         if: github.ref == 'refs/heads/main'
         uses: ./.github/actions/prepare-aur
         with:
           channel: ${{ inputs.channel }}
-          pkgbuild-path: ${{ inputs.pkgbuild_path }}
+          pkgbuild-path: ${{ needs.prepare.outputs.pkgbuild_path }}
 
       - name: Install SSH key
         if: github.ref == 'refs/heads/main'
@@ -208,7 +196,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         env:
           AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
-          AUR_PACKAGE: ${{ inputs.aur_package }}
+          AUR_PACKAGE: ${{ needs.prepare.outputs.aur_package }}
           AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
           CHANNEL: ${{ inputs.channel }}
           PACKAGE_COMMIT: ${{ needs.prepare.outputs.package_commit }}
@@ -217,3 +205,19 @@ jobs:
           ./scripts/publish-aur.sh \
             "$AUR_PACKAGE" \
             "Update $CHANNEL to version $PACKAGE_VERSION (commit $PACKAGE_COMMIT)"
+
+      - name: Commit channel PKGBUILD
+        if: needs.prepare.outputs.plan_status == 'update-and-publish'
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          PACKAGE_COMMIT: ${{ needs.prepare.outputs.package_commit }}
+          PACKAGE_VERSION: ${{ needs.prepare.outputs.package_version }}
+          PKGBUILD_PATH: ${{ needs.prepare.outputs.pkgbuild_path }}
+          TARGET_REF: ${{ github.ref_name }}
+        run: |
+          # Commit last so a failed AUR publish remains eligible for an automatic retry.
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add "$PKGBUILD_PATH"
+          git commit -m "Update $CHANNEL PKGBUILD to version $PACKAGE_VERSION (commit $PACKAGE_COMMIT)"
+          git push origin "HEAD:$TARGET_REF"

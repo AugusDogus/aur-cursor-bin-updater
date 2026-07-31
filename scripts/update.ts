@@ -10,7 +10,10 @@ import {
   LatestRelease,
 } from "./lib/cursor-api";
 import { generateSrcinfo, parseCurrentVersion, updatePkgbuild } from "./lib/pkgbuild";
-import { PublicationDecision, PublicationPlan } from "./lib/publication";
+import {
+  PublicationDecision,
+  PublicationExecution,
+} from "./lib/publication";
 import { checkResultSchema, preparationResultSchema } from "./schemas";
 
 try {
@@ -40,32 +43,36 @@ try {
     process.exit(0);
   }
 
-  const plan = PublicationPlan.fromRelease(
+  const execution = PublicationExecution.fromRelease(
     current,
     release,
     options.mode === "prepare" && options.forcePublish,
   );
 
-  if (plan.status === "update-and-publish") {
+  if (execution.status === "update-and-publish") {
     const checksums = await Architecture.mapValues(
       async (architecture) =>
         options.skipChecksum
           ? "SKIP"
-          : await computeDebSha512(plan.latest, architecture),
+          : await computeDebSha512(execution.latest, architecture),
     );
-    await updatePkgbuild(options.pkgbuildPath, plan.latest, checksums);
+    await updatePkgbuild(options.pkgbuildPath, execution.latest, checksums);
   }
 
   if (options.mode === "prepare") {
     const result = preparationResultSchema.parse({
       channel: options.channel,
-      plan,
+      target: {
+        pkgbuild_path: channel.defaultPkgbuild,
+        aur_package: channel.aurPackage,
+      },
+      plan: PublicationExecution.toDto(execution),
     });
     console.log(JSON.stringify(result, null, 2));
     process.exit(0);
   }
 
-  if (plan.status === "skip") {
+  if (execution.status === "skip") {
     console.error(
       release.status === "available"
         ? "Already up to date."
@@ -73,12 +80,12 @@ try {
     );
     process.exit(2);
   }
-  if (plan.status === "publish-current") {
+  if (execution.status === "publish-current") {
     throw new Error("Update mode cannot force publication");
   }
 
   console.error(
-    `Updated ${options.pkgbuildPath} -> ${plan.latest.upstreamPkgver} (${plan.latest.commit.slice(0, 8)})`,
+    `Updated ${options.pkgbuildPath} -> ${execution.latest.upstreamPkgver} (${execution.latest.commit.slice(0, 8)})`,
   );
 } catch (error: unknown) {
   const message = error instanceof Error ? error.message : String(error);

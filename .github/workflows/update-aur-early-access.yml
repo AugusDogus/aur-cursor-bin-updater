@@ -18,7 +18,5 @@ jobs:
     uses: ./.github/workflows/update-aur.yml
     with:
       channel: early-access
-      pkgbuild_path: packaging/early-access/PKGBUILD
-      aur_package: cursor-early-access-bin
       force_publish: ${{ inputs.force_publish }}
     secrets: inherit

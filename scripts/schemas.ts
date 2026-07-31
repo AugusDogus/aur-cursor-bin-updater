@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { channels } from "./lib/channels";
+
 export const channelKeySchema = z.enum(["nightly", "early-access"]);
 
 const upstreamVersionSchema = z
@@ -88,26 +90,42 @@ export const checkResultSchema = z.object({
 	publication: publicationDecisionSchema,
 });
 
-export const preparationResultSchema = z.object({
-	channel: channelKeySchema,
-	plan: z.discriminatedUnion("status", [
-		z.object({
-			status: z.literal("skip"),
-			publication: nonUpdatePublicationDecisionSchema,
+export const preparationPlanSchema = z.discriminatedUnion("status", [
+	z.object({
+		status: z.literal("skip"),
+		publication: nonUpdatePublicationDecisionSchema,
+	}),
+	z.object({
+		status: z.literal("publish-current"),
+		package: versionSummarySchema,
+	}),
+	z.object({
+		status: z.literal("update-and-publish"),
+		package: versionSummarySchema,
+	}),
+]);
+export const preparationResultSchema = z.discriminatedUnion("channel", [
+	z.object({
+		channel: z.literal("nightly"),
+		target: z.object({
+			pkgbuild_path: z.literal(channels.nightly.defaultPkgbuild),
+			aur_package: z.literal(channels.nightly.aurPackage),
 		}),
-		z.object({
-			status: z.literal("publish-current"),
-			package: versionSummarySchema,
+		plan: preparationPlanSchema,
+	}),
+	z.object({
+		channel: z.literal("early-access"),
+		target: z.object({
+			pkgbuild_path: z.literal(channels["early-access"].defaultPkgbuild),
+			aur_package: z.literal(channels["early-access"].aurPackage),
 		}),
-		z.object({
-			status: z.literal("update-and-publish"),
-			package: versionSummarySchema,
-		}),
-	]),
-});
+		plan: preparationPlanSchema,
+	}),
+]);
 
 export type ChannelKey = z.infer<typeof channelKeySchema>;
 export type CurrentVersion = z.infer<typeof currentVersionSchema>;
 export type LatestVersion = z.infer<typeof latestVersionSchema>;
 export type PublicationDecision = z.infer<typeof publicationDecisionSchema>;
+export type PreparationPlanDto = z.infer<typeof preparationPlanSchema>;
 export type PreparationResult = z.infer<typeof preparationResultSchema>;
