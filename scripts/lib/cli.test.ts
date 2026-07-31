@@ -38,8 +38,11 @@ describe("parseCliOptions", () => {
       ]),
     ).toEqual({
       mode: "prepare",
-      channel: "nightly",
-      pkgbuildPath: "packaging/nightly/PKGBUILD",
+      target: {
+        channel: "nightly",
+        pkgbuild_path: "packaging/nightly/PKGBUILD",
+        aur_package: "cursor-nightly-bin",
+      },
       skipChecksum: false,
       forcePublish: true,
     });
@@ -52,6 +55,29 @@ describe("parseCliOptions", () => {
         "other/PKGBUILD",
       ]),
     ).toThrow("--prepare uses the selected channel's canonical PKGBUILD");
+  });
+
+  test("keeps srcinfo generation file-only", () => {
+    expect(
+      parseCliOptions([
+        "--srcinfo",
+        "--pkgbuild",
+        "packaging/nightly/PKGBUILD",
+      ]),
+    ).toEqual({
+      mode: "srcinfo",
+      pkgbuildPath: "packaging/nightly/PKGBUILD",
+      srcinfoPath: "packaging/nightly/.SRCINFO",
+    });
+    expect(() =>
+      parseCliOptions([
+        "--srcinfo",
+        "--channel",
+        "nightly",
+        "--pkgbuild",
+        "packaging/nightly/PKGBUILD",
+      ]),
+    ).toThrow("--channel is not used with --srcinfo");
   });
 
   test("rejects flags used outside their mode", () => {

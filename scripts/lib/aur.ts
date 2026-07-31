@@ -1,7 +1,5 @@
-import { file } from "bun";
-
 import type { ChannelTarget } from "./channels";
-import { generateSrcinfo } from "./pkgbuild";
+import { getAurPackageFiles } from "./aur-manifest";
 
 export type AurFetch = (
   input: string,
@@ -26,17 +24,10 @@ export async function isAurPackageCurrent(
   target: ChannelTarget,
   fetcher: AurFetch = defaultFetch,
 ) {
-  const localFiles = {
-    PKGBUILD: await file(target.pkgbuild_path).text(),
-    ".SRCINFO": await generateSrcinfo(target.pkgbuild_path),
-    "cursor.desktop": await file("packaging/common/cursor.desktop").text(),
-    "cursor-launcher.sh": await file(
-      "packaging/common/cursor-launcher.sh",
-    ).text(),
-  };
+  const localFiles = await getAurPackageFiles(target);
 
   const comparisons = await Promise.all(
-    Object.entries(localFiles).map(async ([filename, localContent]) => {
+    localFiles.map(async ({ filename, content }) => {
       const response = await fetcher(
         getAurFileUrl(target.aur_package, filename),
         { signal: AbortSignal.timeout(30_000) },
@@ -47,7 +38,7 @@ export async function isAurPackageCurrent(
           `AUR comparison failed for ${target.aur_package}/${filename}: HTTP ${response.status}`,
         );
       }
-      return normalize(await response.text()) === normalize(localContent);
+      return normalize(await response.text()) === normalize(content);
     }),
   );
   return comparisons.every(Boolean);

@@ -36,11 +36,17 @@ describe("Architecture", () => {
   });
 
   test("maps values by architecture key", async () => {
+    const values = await Architecture.mapValues(
+      async (architecture) => architecture.deb,
+    );
     expect(
-      await Architecture.mapValues(async (architecture) => architecture.deb),
-    ).toEqual({
-      x86_64: "amd64",
-      aarch64: "arm64",
-    });
+      values.entries().map(({ architecture, value }) => [
+        architecture.pkgbuild,
+        value,
+      ]),
+    ).toEqual([
+      ["x86_64", "amd64"],
+      ["aarch64", "arm64"],
+    ]);
   });
 });

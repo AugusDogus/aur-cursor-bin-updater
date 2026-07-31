@@ -1,21 +1,18 @@
-import { file } from "bun";
 import { describe, expect, test } from "bun:test";
 
+import { getAurPackageFiles } from "./aur-manifest";
 import { isAurPackageCurrent, type AurFetch } from "./aur";
 import { getChannelTarget } from "./channels";
-import { generateSrcinfo } from "./pkgbuild";
 
 const target = getChannelTarget("nightly");
 
 async function localAurFiles() {
-  return {
-    PKGBUILD: await file(target.pkgbuild_path).text(),
-    ".SRCINFO": await generateSrcinfo(target.pkgbuild_path),
-    "cursor.desktop": await file("packaging/common/cursor.desktop").text(),
-    "cursor-launcher.sh": await file(
-      "packaging/common/cursor-launcher.sh",
-    ).text(),
-  };
+  return Object.fromEntries(
+    (await getAurPackageFiles(target)).map(({ filename, content }) => [
+      filename,
+      content,
+    ]),
+  );
 }
 
 function filenameFromRequest(input: string) {

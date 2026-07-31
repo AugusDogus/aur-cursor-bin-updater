@@ -5,6 +5,7 @@ import {
   type CurrentVersion,
   type LatestVersion,
 } from "../schemas";
+import { Architecture } from "./architecture";
 import { PublicationPlan } from "./publication";
 import {
   Release,
@@ -32,7 +33,11 @@ function getRelease(options?: {
 }): ReleaseValue {
   const x86_64 = options?.x86_64 === undefined ? latest : options.x86_64;
   const aarch64 = options?.aarch64 === undefined ? latest : options.aarch64;
-  const alignment = Release.align({ x86_64, aarch64 });
+  const alignment = Release.align(
+    Architecture.values((architecture) =>
+      architecture.pkgbuild === "x86_64" ? x86_64 : aarch64,
+    ),
+  );
   if (alignment.status !== "aligned") return alignment;
   const unavailable = (
     architecture: "x86_64" | "aarch64",
@@ -44,10 +49,12 @@ function getRelease(options?: {
           reason: "HTTP 404",
         }
       : { status: "available" };
-  return Release.afterArtifactChecks(alignment, {
-    x86_64: unavailable("x86_64"),
-    aarch64: unavailable("aarch64"),
-  });
+  return Release.afterArtifactChecks(
+    alignment,
+    Architecture.values((architecture) =>
+      unavailable(architecture.pkgbuild),
+    ),
+  );
 }
 
 describe("PublicationPlan", () => {

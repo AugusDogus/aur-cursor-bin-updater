@@ -289,7 +289,7 @@ export async function updatePkgbuild(
           sawCommit: true,
         };
       if (checksumArchitecture) {
-        const checksum = newSha512[checksumArchitecture.pkgbuild];
+        const checksum = newSha512.get(checksumArchitecture);
         return {
           ...state,
           lines: [

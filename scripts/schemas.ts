@@ -48,7 +48,7 @@ export const latestVersionSchema = z.object({
 	commit: commitSchema,
 });
 
-const versionSummarySchema = z.object({
+export const versionSummarySchema = z.object({
 	pkgver: pkgverSchema,
 	upstream_pkgver: upstreamVersionSchema,
 	commit: commitSchema,
@@ -115,6 +115,7 @@ export const preparationResultSchema = z.object({
 export type { ChannelKey };
 export type CurrentVersion = z.infer<typeof currentVersionSchema>;
 export type LatestVersion = z.infer<typeof latestVersionSchema>;
+export type VersionSummary = z.infer<typeof versionSummarySchema>;
 export type PublicationDecision = z.infer<typeof publicationDecisionSchema>;
 export type PreparationPlanDto = z.infer<typeof preparationPlanSchema>;
 export type PreparationResult = z.infer<typeof preparationResultSchema>;

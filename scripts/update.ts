@@ -4,7 +4,7 @@ import { write } from "bun";
 import { getUsageText, parseCliOptions } from "./lib/cli";
 import {
   checkForUpdate,
-  generateChannelSrcinfo,
+  generateCommandSrcinfo,
   preparePublication,
   updatePackage,
 } from "./lib/update-operations";
@@ -19,7 +19,7 @@ async function main() {
       console.log(JSON.stringify(await preparePublication(command), null, 2));
       return 0;
     case "srcinfo":
-      await write(command.srcinfoPath, await generateChannelSrcinfo(command));
+      await write(command.srcinfoPath, await generateCommandSrcinfo(command));
       console.error(`Generated ${command.srcinfoPath}`);
       return 0;
     case "update": {

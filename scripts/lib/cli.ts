@@ -4,38 +4,42 @@ import { Command } from "commander";
 import {
   channelKeySchema,
   getChannelConfig,
+  getChannelTarget,
   type ChannelKey,
+  type ChannelTarget,
 } from "./channels";
 
 const usage =
-  "Usage: bun scripts/update.ts [--check|--update|--prepare|--srcinfo] --channel <nightly|early-access> [--pkgbuild <path>] [--srcinfo-path <path>] [--skip-checksum] [--force-publish]";
+  "Usage: bun scripts/update.ts [--check|--update|--prepare] --channel <nightly|early-access> [--pkgbuild <path>] [--skip-checksum] [--force-publish], or bun scripts/update.ts --srcinfo --pkgbuild <path> [--srcinfo-path <path>]";
 
-interface ChannelCommand {
+interface ChannelFileCommand {
   channel: ChannelKey;
   pkgbuildPath: string;
 }
 
 export type CliCommand =
-  | (ChannelCommand & { mode: "check" })
-  | (ChannelCommand & {
+  | (ChannelFileCommand & { mode: "check" })
+  | (ChannelFileCommand & {
       mode: "update";
       skipChecksum: boolean;
     })
-  | (ChannelCommand & {
+  | {
       mode: "prepare";
+      target: ChannelTarget;
       skipChecksum: boolean;
       forcePublish: boolean;
-    })
-  | (ChannelCommand & {
+    }
+  | {
       mode: "srcinfo";
+      pkgbuildPath: string;
       srcinfoPath: string;
-    });
+    };
 
 export function getUsageText() {
   return usage;
 }
 
-function parseChannel(rawChannel: string) {
+function parseChannel(rawChannel: string | undefined) {
   const parsed = channelKeySchema.safeParse(rawChannel);
   if (!parsed.success)
     throw new Error("Missing or invalid --channel (nightly|early-access)");
@@ -75,7 +79,7 @@ export function parseCliOptions(args: string[]): CliCommand {
     .option("--update", "Update PKGBUILD in place")
     .option("--prepare", "Prepare a PKGBUILD and output its publication plan")
     .option("--srcinfo", "Generate .SRCINFO from PKGBUILD")
-    .requiredOption("--channel <channel>", "nightly or early-access")
+    .option("--channel <channel>", "nightly or early-access")
     .option("--pkgbuild <path>", "Path to PKGBUILD")
     .option("--srcinfo-path <path>", "Path to .SRCINFO output")
     .option("--skip-checksum", "Skip .deb checksum fetch when updating")
@@ -92,18 +96,14 @@ export function parseCliOptions(args: string[]): CliCommand {
     update?: boolean;
     prepare?: boolean;
     srcinfo?: boolean;
-    channel: string;
+    channel?: string;
     pkgbuild?: string;
     srcinfoPath?: string;
     skipChecksum?: boolean;
     forcePublish?: boolean;
   }>();
   const mode = parseMode(options);
-  const channel = parseChannel(options.channel);
-  const channelConfig = getChannelConfig(channel);
-  if (mode === "prepare" && options.pkgbuild !== undefined) {
-    throw new Error("--prepare uses the selected channel's canonical PKGBUILD");
-  }
+
   if (options.srcinfoPath !== undefined && mode !== "srcinfo") {
     throw new Error("--srcinfo-path requires --srcinfo");
   }
@@ -114,29 +114,47 @@ export function parseCliOptions(args: string[]): CliCommand {
   ) {
     throw new Error("--skip-checksum requires --update or --prepare");
   }
-  const pkgbuildPath = options.pkgbuild ?? channelConfig.defaultPkgbuild;
-  const srcinfoPath =
-    options.srcinfoPath ?? `${dirname(pkgbuildPath)}/.SRCINFO`;
-  const skipChecksum = options.skipChecksum ?? false;
-  const forcePublish = options.forcePublish ?? false;
-  if (forcePublish && mode !== "prepare") {
+  if (options.forcePublish && mode !== "prepare") {
     throw new Error("--force-publish requires --prepare");
   }
 
-  switch (mode) {
-    case "check":
-      return { mode, channel, pkgbuildPath };
-    case "update":
-      return { mode, channel, pkgbuildPath, skipChecksum };
-    case "prepare":
-      return {
-        mode,
-        channel,
-        pkgbuildPath,
-        skipChecksum,
-        forcePublish,
-      };
-    case "srcinfo":
-      return { mode, channel, pkgbuildPath, srcinfoPath };
+  if (mode === "srcinfo") {
+    if (options.channel !== undefined) {
+      throw new Error("--channel is not used with --srcinfo");
+    }
+    if (options.pkgbuild === undefined) {
+      throw new Error("--srcinfo requires --pkgbuild");
+    }
+    return {
+      mode,
+      pkgbuildPath: options.pkgbuild,
+      srcinfoPath:
+        options.srcinfoPath ?? `${dirname(options.pkgbuild)}/.SRCINFO`,
+    };
   }
+
+  const channel = parseChannel(options.channel);
+  if (mode === "prepare") {
+    if (options.pkgbuild !== undefined) {
+      throw new Error(
+        "--prepare uses the selected channel's canonical PKGBUILD",
+      );
+    }
+    return {
+      mode,
+      target: getChannelTarget(channel),
+      skipChecksum: options.skipChecksum ?? false,
+      forcePublish: options.forcePublish ?? false,
+    };
+  }
+
+  const pkgbuildPath =
+    options.pkgbuild ?? getChannelConfig(channel).defaultPkgbuild;
+  if (mode === "check") return { mode, channel, pkgbuildPath };
+  return {
+    mode,
+    channel,
+    pkgbuildPath,
+    skipChecksum: options.skipChecksum ?? false,
+  };
 }

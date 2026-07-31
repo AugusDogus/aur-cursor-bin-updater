@@ -62,31 +62,36 @@ function brand<State extends ReleaseState>(
 
 export const Release = {
   align(releases: ArchitectureReleases): ReleaseAlignment {
-    const x86_64 = releases.x86_64;
-    const aarch64 = releases.aarch64;
-    if (x86_64 === null && aarch64 === null) {
+    const entries = releases.entries();
+    const available = entries.flatMap(({ value }) =>
+      value === null ? [] : [value],
+    );
+    const reference = available[0];
+    if (reference === undefined) {
       return brand({ status: "unavailable" });
     }
     if (
-      x86_64 === null ||
-      aarch64 === null ||
-      x86_64.upstreamPkgver !== aarch64.upstreamPkgver ||
-      x86_64.pkgver !== aarch64.pkgver ||
-      x86_64.commit !== aarch64.commit
+      available.length !== entries.length ||
+      available.some(
+        (latest) =>
+          latest.upstreamPkgver !== reference.upstreamPkgver ||
+          latest.pkgver !== reference.pkgver ||
+          latest.commit !== reference.commit,
+      )
     ) {
       return brand({
         status: "architecture-mismatch",
         releases,
       });
     }
-    return { status: "aligned", latest: x86_64 };
+    return { status: "aligned", latest: reference };
   },
   afterArtifactChecks(
     alignment: Extract<ReleaseAlignment, { status: "aligned" }>,
     artifactChecks: ArchitectureValues<ArtifactAvailability>,
   ): Release {
     const unavailableArtifacts = Architecture.all.flatMap((architecture) => {
-      const artifact = artifactChecks[architecture.pkgbuild];
+      const artifact = artifactChecks.get(architecture);
       return artifact.status === "unavailable"
         ? [
             {
@@ -123,7 +128,7 @@ export const Release = {
       case "architecture-mismatch":
         return `Architecture releases are not aligned: ${Architecture.all
           .map((architecture) => {
-            const latest = release.releases[architecture.pkgbuild];
+            const latest = release.releases.get(architecture);
             return latest
               ? `${architecture.pkgbuild}=${latest.upstreamPkgver} (${latest.commit})`
               : `${architecture.pkgbuild}=unavailable`;

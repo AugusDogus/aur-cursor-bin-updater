@@ -14,19 +14,11 @@ fi
 pkgname=$1
 commit_message=$2
 
-required_files=(
-  ".aur/PKGBUILD"
-  ".aur/.SRCINFO"
-  ".aur/cursor.desktop"
-  ".aur/cursor-launcher.sh"
-)
-
-for path in "${required_files[@]}"; do
-  if [[ ! -f "$path" ]]; then
-    echo "Missing required file: $path" >&2
-    exit 1
-  fi
-done
+manifest_path=".aur/.publish-manifest"
+if [[ ! -f "$manifest_path" ]]; then
+  echo "Missing AUR publication manifest: $manifest_path" >&2
+  exit 1
+fi
 
 aur_https_url="https://aur.archlinux.org/${pkgname}.git"
 aur_ssh_url="ssh://aur@aur.archlinux.org/${pkgname}.git"
@@ -41,14 +33,36 @@ trap 'rm -rf "$tmpdir"' EXIT
 
 git clone "$aur_ssh_url" "$tmpdir"
 
-install -m644 ".aur/PKGBUILD" "$tmpdir/PKGBUILD"
-install -m644 ".aur/.SRCINFO" "$tmpdir/.SRCINFO"
-install -m644 ".aur/cursor.desktop" "$tmpdir/cursor.desktop"
-install -m755 ".aur/cursor-launcher.sh" "$tmpdir/cursor-launcher.sh"
+published_files=()
+while IFS=$'\t' read -r mode filename; do
+  if [[ -z "$mode" && -z "$filename" ]]; then
+    continue
+  fi
+  if [[ "$mode" != "644" && "$mode" != "755" ]]; then
+    echo "Invalid AUR file mode in $manifest_path: $mode" >&2
+    exit 1
+  fi
+  if [[ ! "$filename" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "Invalid AUR filename in $manifest_path: $filename" >&2
+    exit 1
+  fi
+  source_path=".aur/$filename"
+  if [[ ! -f "$source_path" ]]; then
+    echo "Missing staged AUR file: $source_path" >&2
+    exit 1
+  fi
+  install -m"$mode" "$source_path" "$tmpdir/$filename"
+  published_files+=("$filename")
+done < "$manifest_path"
+
+if [[ ${#published_files[@]} -eq 0 ]]; then
+  echo "AUR publication manifest is empty: $manifest_path" >&2
+  exit 1
+fi
 
 git -C "$tmpdir" config user.name "$AUR_USERNAME"
 git -C "$tmpdir" config user.email "$AUR_EMAIL"
-git -C "$tmpdir" add PKGBUILD .SRCINFO cursor.desktop cursor-launcher.sh
+git -C "$tmpdir" add -- "${published_files[@]}"
 
 if git -C "$tmpdir" diff --cached --quiet; then
   echo "No AUR changes to publish for $pkgname."

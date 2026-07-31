@@ -5,6 +5,7 @@ import type {
   PublicationDecision,
 } from "../schemas";
 import { Release, type Release as ReleaseValue } from "./release";
+import { summarizeVersion } from "./version";
 
 type NonUpdatePublicationDecision = Exclude<
   PublicationDecision,
@@ -29,16 +30,6 @@ export type ReleasePublicationPlan = Exclude<
   PublicationPlan,
   { status: "publish-current" }
 >;
-
-function summarizeVersion(
-  version: Pick<CurrentVersion, "pkgver" | "upstreamPkgver" | "commit">,
-) {
-  return {
-    pkgver: version.pkgver,
-    upstream_pkgver: version.upstreamPkgver,
-    commit: version.commit,
-  };
-}
 
 function unreachable(value: never): never {
   throw new Error(`Unhandled publication plan: ${JSON.stringify(value)}`);

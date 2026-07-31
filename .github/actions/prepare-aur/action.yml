@@ -1,12 +1,9 @@
 name: Prepare AUR artifacts
-description: Stage PKGBUILD files for AUR publishing and validate local source checksums. Requires prior actions/checkout and Bun on PATH (for example via oven-sh/setup-bun).
+description: Stage AUR files and validate local source checksums. Requires prior actions/checkout and Bun on PATH.
 
 inputs:
   channel:
-    description: Release channel name used for .SRCINFO generation
-    required: true
-  pkgbuild-path:
-    description: Source PKGBUILD path to copy into the .aur staging directory
+    description: Release channel to stage
     required: true
 
 runs:
@@ -15,30 +12,13 @@ runs:
     - name: Stage AUR files
       shell: bash
       env:
-        PKGBUILD_PATH: ${{ inputs.pkgbuild-path }}
-      run: |
-        mkdir -p .aur
-        cp "$PKGBUILD_PATH" .aur/PKGBUILD
-        cp packaging/common/cursor.desktop packaging/common/cursor-launcher.sh .aur/
+        CHANNEL: ${{ inputs.channel }}
+      run: bun scripts/stage-aur.ts --channel "$CHANNEL"
 
     - name: Verify local source checksums
       shell: bash
-      env:
-        PKGBUILD_PATH: .aur/PKGBUILD
       run: |
         bun scripts/verify-local-source-checksums.ts \
-          --pkgbuild "$PKGBUILD_PATH" \
+          --pkgbuild .aur/PKGBUILD \
           --source .aur/cursor.desktop \
           --source .aur/cursor-launcher.sh
-
-    - name: Generate .SRCINFO
-      shell: bash
-      env:
-        CHANNEL: ${{ inputs.channel }}
-        PKGBUILD_PATH: .aur/PKGBUILD
-      run: |
-        bun scripts/update.ts \
-          --srcinfo \
-          --channel "$CHANNEL" \
-          --pkgbuild "$PKGBUILD_PATH" \
-          --srcinfo-path .aur/.SRCINFO

@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: aur-publication-${{ inputs.channel }}-${{ github.ref }}
+  group: aur-publication-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -196,7 +196,6 @@ jobs:
         uses: ./.github/actions/prepare-aur
         with:
           channel: ${{ inputs.channel }}
-          pkgbuild-path: ${{ needs.prepare.outputs.pkgbuild_path }}
 
       - name: Install SSH key
         if: github.ref == 'refs/heads/main'

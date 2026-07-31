@@ -37,7 +37,7 @@ Requires [Bun](https://bun.sh/). From the repo root:
 ```bash
 bun scripts/update.ts --check --channel early-access
 bun scripts/update.ts --update --channel nightly
-bun scripts/update.ts --srcinfo --channel early-access
+bun scripts/update.ts --srcinfo --pkgbuild packaging/early-access/PKGBUILD
 ```
 
 `--check` returns a discriminated JSON result. The release state is in

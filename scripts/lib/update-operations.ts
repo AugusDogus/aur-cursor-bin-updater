@@ -2,7 +2,7 @@ import type { LatestVersion } from "../schemas";
 import { checkResultSchema, preparationResultSchema } from "../schemas";
 import { Architecture } from "./architecture";
 import { isAurPackageCurrent } from "./aur";
-import { getChannelConfig, getChannelTarget } from "./channels";
+import { getChannelConfig } from "./channels";
 import type { CliCommand } from "./cli";
 import { computeDebSha512 } from "./cursor-artifact";
 import { getLatestRelease } from "./cursor-api";
@@ -11,11 +11,9 @@ import {
   parseCurrentVersion,
   updatePkgbuild,
 } from "./pkgbuild";
-import {
-  PublicationPlan,
-  type PublicationPlan as PublicationPlanValue,
-} from "./publication";
+import { PublicationPlan } from "./publication";
 import { Release } from "./release";
+import { summarizeVersion } from "./version";
 
 export interface UpdateDependencies {
   getLatestRelease: typeof getLatestRelease;
@@ -45,7 +43,11 @@ async function applyLatestVersion(
         ? "SKIP"
         : await dependencies.computeDebSha512(latest, architecture),
   );
-  await updatePkgbuild(command.pkgbuildPath, latest, checksums);
+  const pkgbuildPath =
+    command.mode === "prepare"
+      ? command.target.pkgbuild_path
+      : command.pkgbuildPath;
+  await updatePkgbuild(pkgbuildPath, latest, checksums);
 }
 
 export async function checkForUpdate(
@@ -59,11 +61,7 @@ export async function checkForUpdate(
   const plan = PublicationPlan.fromRelease(current, release);
   return checkResultSchema.parse({
     channel: command.channel,
-    current: {
-      pkgver: current.pkgver,
-      upstream_pkgver: current.upstreamPkgver,
-      commit: current.commit,
-    },
+    current: summarizeVersion(current),
     publication: PublicationPlan.toDecision(plan),
   });
 }
@@ -72,8 +70,8 @@ export async function preparePublication(
   command: PrepareCommand,
   dependencies: UpdateDependencies = defaultDependencies,
 ) {
-  const current = await parseCurrentVersion(command.pkgbuildPath);
-  const target = getChannelTarget(command.channel);
+  const target = command.target;
+  const current = await parseCurrentVersion(target.pkgbuild_path);
   if (command.forcePublish) {
     return preparationResultSchema.parse({
       target,
@@ -81,19 +79,22 @@ export async function preparePublication(
     });
   }
 
+  if (!(await dependencies.isAurPackageCurrent(target))) {
+    return preparationResultSchema.parse({
+      target,
+      plan: PublicationPlan.toDto(
+        PublicationPlan.publishCurrent(current),
+      ),
+    });
+  }
+
   const release = await dependencies.getLatestRelease(
-    getChannelConfig(command.channel),
+    getChannelConfig(target.channel),
   );
-  let plan: PublicationPlanValue = PublicationPlan.fromRelease(
+  const plan = PublicationPlan.fromRelease(
     current,
     release,
   );
-  if (
-    plan.status === "skip" &&
-    !(await dependencies.isAurPackageCurrent(target))
-  ) {
-    plan = PublicationPlan.publishCurrent(current);
-  }
   if (plan.status === "update-and-publish") {
     await applyLatestVersion(command, plan.latest, dependencies);
   }
@@ -135,6 +136,6 @@ export async function updatePackage(
   return { status: "updated", latest: plan.latest };
 }
 
-export async function generateChannelSrcinfo(command: SrcinfoCommand) {
+export async function generateCommandSrcinfo(command: SrcinfoCommand) {
   return generateSrcinfo(command.pkgbuildPath);
 }
