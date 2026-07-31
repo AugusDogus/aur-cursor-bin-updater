@@ -1,8 +1,11 @@
 import { dirname } from "node:path";
 import { Command } from "commander";
 
-import { channelKeySchema, type ChannelKey } from "../schemas";
-import { getChannelConfig } from "./channels";
+import {
+  channelKeySchema,
+  getChannelConfig,
+  type ChannelKey,
+} from "./channels";
 
 const usage =
   "Usage: bun scripts/update.ts [--check|--update|--prepare|--srcinfo] --channel <nightly|early-access> [--pkgbuild <path>] [--srcinfo-path <path>] [--skip-checksum] [--force-publish]";
@@ -88,6 +91,16 @@ export function parseCliOptions(args: string[]): CliOptions {
   const channelConfig = getChannelConfig(channel);
   if (mode === "prepare" && options.pkgbuild !== undefined) {
     throw new Error("--prepare uses the selected channel's canonical PKGBUILD");
+  }
+  if (options.srcinfoPath !== undefined && mode !== "srcinfo") {
+    throw new Error("--srcinfo-path requires --srcinfo");
+  }
+  if (
+    options.skipChecksum &&
+    mode !== "update" &&
+    mode !== "prepare"
+  ) {
+    throw new Error("--skip-checksum requires --update or --prepare");
   }
   const pkgbuildPath = options.pkgbuild ?? channelConfig.defaultPkgbuild;
   const srcinfoPath =

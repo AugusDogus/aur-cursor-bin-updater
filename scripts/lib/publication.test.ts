@@ -7,10 +7,7 @@ import {
 } from "../schemas";
 import type { ChannelConfig } from "./channels";
 import { getLatestRelease } from "./cursor-api";
-import {
-  PublicationDecision,
-  PublicationExecution,
-} from "./publication";
+import { PublicationPlan } from "./publication";
 
 const channel: ChannelConfig = {
   releaseTrack: "dev",
@@ -72,10 +69,14 @@ async function getRelease(options?: {
   });
 }
 
-describe("PublicationDecision.fromRelease", () => {
+describe("PublicationPlan", () => {
   test("distinguishes an update from an aligned current release", async () => {
     const available = await getRelease();
-    expect(PublicationDecision.fromRelease(current, available)).toEqual({
+    expect(
+      PublicationPlan.toDecision(
+        PublicationPlan.fromRelease(current, available),
+      ),
+    ).toEqual({
       status: "update-available",
       latest: {
         pkgver: latest.pkgver,
@@ -91,12 +92,14 @@ describe("PublicationDecision.fromRelease", () => {
       commit: current.commit,
     };
     expect(
-      PublicationDecision.fromRelease(
-        current,
-        await getRelease({
-          x86_64: currentRelease,
-          aarch64: currentRelease,
-        }),
+      PublicationPlan.toDecision(
+        PublicationPlan.fromRelease(
+          current,
+          await getRelease({
+            x86_64: currentRelease,
+            aarch64: currentRelease,
+          }),
+        ),
       ),
     ).toEqual({ status: "up-to-date" });
   });
@@ -118,33 +121,24 @@ describe("PublicationDecision.fromRelease", () => {
     ] as const;
 
     for (const [release, expected] of releases) {
-      const decision = PublicationDecision.fromRelease(current, release);
+      const decision = PublicationPlan.toDecision(
+        PublicationPlan.fromRelease(current, release),
+      );
       expect(decision.status).toBe(expected);
       if ("message" in decision) {
         expect(decision.message.length).toBeGreaterThan(0);
       }
     }
   });
-});
 
-describe("PublicationExecution", () => {
   test("derives and serializes one atomic workflow plan", async () => {
     const release = await getRelease();
-    const updateExecution = PublicationExecution.fromRelease(
-      current,
-      release,
-      false,
-    );
-    expect(updateExecution).toEqual({
+    const updatePlan = PublicationPlan.fromRelease(current, release);
+    expect(updatePlan).toEqual({
       status: "update-and-publish",
       latest,
-      package: {
-        pkgver: latest.pkgver,
-        upstream_pkgver: latest.upstreamPkgver,
-        commit: latest.commit,
-      },
     });
-    expect(PublicationExecution.toDto(updateExecution)).toEqual({
+    expect(PublicationPlan.toDto(updatePlan)).toEqual({
       status: "update-and-publish",
       package: {
         pkgver: latest.pkgver,
@@ -153,12 +147,8 @@ describe("PublicationExecution", () => {
       },
     });
 
-    const currentExecution = PublicationExecution.fromRelease(
-      current,
-      release,
-      true,
-    );
-    expect(PublicationExecution.toDto(currentExecution)).toEqual({
+    const currentPlan = PublicationPlan.publishCurrent(current);
+    expect(PublicationPlan.toDto(currentPlan)).toEqual({
       status: "publish-current",
       package: {
         pkgver: current.pkgver,
@@ -171,8 +161,8 @@ describe("PublicationExecution", () => {
   test("rejects a channel paired with another package target", () => {
     expect(() =>
       preparationResultSchema.parse({
-        channel: "nightly",
         target: {
+          channel: "nightly",
           pkgbuild_path: "packaging/early-access/PKGBUILD",
           aur_package: "cursor-early-access-bin",
         },

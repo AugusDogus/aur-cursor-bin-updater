@@ -3,17 +3,14 @@ import { write } from "bun";
 
 import { parseCliOptions, getUsageText } from "./lib/cli";
 import { Architecture } from "./lib/architecture";
-import { getChannelConfig } from "./lib/channels";
+import { getChannelConfig, getChannelTarget } from "./lib/channels";
 import {
   computeDebSha512,
   getLatestRelease,
   LatestRelease,
 } from "./lib/cursor-api";
 import { generateSrcinfo, parseCurrentVersion, updatePkgbuild } from "./lib/pkgbuild";
-import {
-  PublicationDecision,
-  PublicationExecution,
-} from "./lib/publication";
+import { PublicationPlan } from "./lib/publication";
 import { checkResultSchema, preparationResultSchema } from "./schemas";
 
 try {
@@ -27,7 +24,17 @@ try {
   }
 
   const current = await parseCurrentVersion(options.pkgbuildPath);
+  if (options.mode === "prepare" && options.forcePublish) {
+    const result = preparationResultSchema.parse({
+      target: getChannelTarget(options.channel),
+      plan: PublicationPlan.toDto(PublicationPlan.publishCurrent(current)),
+    });
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(0);
+  }
+
   const release = await getLatestRelease(channel);
+  const plan = PublicationPlan.fromRelease(current, release);
 
   if (options.mode === "check") {
     const result = checkResultSchema.parse({
@@ -37,42 +44,32 @@ try {
         upstream_pkgver: current.upstreamPkgver,
         commit: current.commit,
       },
-      publication: PublicationDecision.fromRelease(current, release),
+      publication: PublicationPlan.toDecision(plan),
     });
     console.log(JSON.stringify(result, null, 2));
     process.exit(0);
   }
 
-  const execution = PublicationExecution.fromRelease(
-    current,
-    release,
-    options.mode === "prepare" && options.forcePublish,
-  );
-
-  if (execution.status === "update-and-publish") {
+  if (plan.status === "update-and-publish") {
     const checksums = await Architecture.mapValues(
       async (architecture) =>
         options.skipChecksum
           ? "SKIP"
-          : await computeDebSha512(execution.latest, architecture),
+          : await computeDebSha512(plan.latest, architecture),
     );
-    await updatePkgbuild(options.pkgbuildPath, execution.latest, checksums);
+    await updatePkgbuild(options.pkgbuildPath, plan.latest, checksums);
   }
 
   if (options.mode === "prepare") {
     const result = preparationResultSchema.parse({
-      channel: options.channel,
-      target: {
-        pkgbuild_path: channel.defaultPkgbuild,
-        aur_package: channel.aurPackage,
-      },
-      plan: PublicationExecution.toDto(execution),
+      target: getChannelTarget(options.channel),
+      plan: PublicationPlan.toDto(plan),
     });
     console.log(JSON.stringify(result, null, 2));
     process.exit(0);
   }
 
-  if (execution.status === "skip") {
+  if (plan.status === "skip") {
     console.error(
       release.status === "available"
         ? "Already up to date."
@@ -80,12 +77,8 @@ try {
     );
     process.exit(2);
   }
-  if (execution.status === "publish-current") {
-    throw new Error("Update mode cannot force publication");
-  }
-
   console.error(
-    `Updated ${options.pkgbuildPath} -> ${execution.latest.upstreamPkgver} (${execution.latest.commit.slice(0, 8)})`,
+    `Updated ${options.pkgbuildPath} -> ${plan.latest.upstreamPkgver} (${plan.latest.commit.slice(0, 8)})`,
   );
 } catch (error: unknown) {
   const message = error instanceof Error ? error.message : String(error);

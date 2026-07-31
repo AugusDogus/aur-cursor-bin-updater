@@ -2,7 +2,7 @@ import type {
   CurrentVersion,
   LatestVersion,
   PreparationPlanDto,
-  PublicationDecision as PublicationDecisionValue,
+  PublicationDecision,
 } from "../schemas";
 import {
   LatestRelease,
@@ -10,24 +10,28 @@ import {
 } from "./cursor-api";
 
 type NonUpdatePublicationDecision = Exclude<
-  PublicationDecisionValue,
+  PublicationDecision,
   { status: "update-available" }
 >;
 
-export type PublicationExecution =
+export type PublicationPlan =
   | {
       status: "skip";
       publication: NonUpdatePublicationDecision;
     }
   | {
       status: "publish-current";
-      package: ReturnType<typeof summarizeVersion>;
+      current: CurrentVersion;
     }
   | {
       status: "update-and-publish";
       latest: LatestVersion;
-      package: ReturnType<typeof summarizeVersion>;
     };
+
+export type ReleasePublicationPlan = Exclude<
+  PublicationPlan,
+  { status: "publish-current" }
+>;
 
 function summarizeVersion(
   version: Pick<CurrentVersion, "pkgver" | "upstreamPkgver" | "commit">,
@@ -40,89 +44,87 @@ function summarizeVersion(
 }
 
 function unreachable(value: never): never {
-  throw new Error(`Unhandled publication execution: ${JSON.stringify(value)}`);
+  throw new Error(`Unhandled publication plan: ${JSON.stringify(value)}`);
 }
 
-export const PublicationDecision = {
+export const PublicationPlan = {
   fromRelease(
     current: CurrentVersion,
     release: LatestReleaseValue,
-  ): PublicationDecisionValue {
+  ): ReleasePublicationPlan {
     switch (release.status) {
       case "available":
         return current.upstreamPkgver !== release.latest.upstreamPkgver ||
           current.commit !== release.latest.commit
           ? {
-              status: "update-available",
-              latest: summarizeVersion(release.latest),
+              status: "update-and-publish",
+              latest: release.latest,
             }
-          : { status: "up-to-date" };
+          : {
+              status: "skip",
+              publication: { status: "up-to-date" },
+            };
       case "unavailable":
         return {
-          status: "release-unavailable",
-          message: LatestRelease.message(release),
+          status: "skip",
+          publication: {
+            status: "release-unavailable",
+            message: LatestRelease.message(release),
+          },
         };
       case "architecture-mismatch":
         return {
-          status: "architecture-mismatch",
-          message: LatestRelease.message(release),
+          status: "skip",
+          publication: {
+            status: "architecture-mismatch",
+            message: LatestRelease.message(release),
+          },
         };
       case "artifact-unavailable":
         return {
-          status: "artifact-unavailable",
-          message: LatestRelease.message(release),
+          status: "skip",
+          publication: {
+            status: "artifact-unavailable",
+            message: LatestRelease.message(release),
+          },
         };
     }
   },
-} as const;
-
-export const PublicationExecution = {
-  fromRelease(
-    current: CurrentVersion,
-    release: LatestReleaseValue,
-    forcePublish: boolean,
-  ): PublicationExecution {
-    if (forcePublish) {
-      return {
-        status: "publish-current",
-        package: summarizeVersion(current),
-      };
-    }
-
-    const publication = PublicationDecision.fromRelease(current, release);
-    if (publication.status !== "update-available") {
-      return { status: "skip", publication };
-    }
-    if (release.status !== "available") {
-      throw new Error(
-        "Publication decision is inconsistent: an update requires an available release",
-      );
-    }
-    return {
-      status: "update-and-publish",
-      latest: release.latest,
-      package: summarizeVersion(release.latest),
-    };
+  publishCurrent(current: CurrentVersion): PublicationPlan {
+    return { status: "publish-current", current };
   },
-  toDto(execution: PublicationExecution): PreparationPlanDto {
-    switch (execution.status) {
+  toDecision(plan: ReleasePublicationPlan): PublicationDecision {
+    switch (plan.status) {
+      case "skip":
+        return plan.publication;
+      case "update-and-publish":
+        return {
+          status: "update-available",
+          latest: summarizeVersion(plan.latest),
+        };
+      default:
+        return unreachable(plan);
+    }
+  },
+  toDto(plan: PublicationPlan): PreparationPlanDto {
+    switch (plan.status) {
       case "skip":
         return {
           status: "skip",
-          publication: execution.publication,
+          publication: plan.publication,
         };
       case "publish-current":
         return {
           status: "publish-current",
-          package: execution.package,
+          package: summarizeVersion(plan.current),
         };
       case "update-and-publish":
         return {
           status: "update-and-publish",
-          package: execution.package,
+          package: summarizeVersion(plan.latest),
         };
       default:
-        return unreachable(execution);
+        return unreachable(plan);
     }
   },
 } as const;

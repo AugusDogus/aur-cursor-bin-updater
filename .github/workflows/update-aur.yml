@@ -17,8 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  # Serialize both channels so repository and AUR state cannot be reordered.
-  group: aur-publication-${{ github.ref }}
+  group: aur-publication-${{ inputs.channel }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -138,13 +137,10 @@ jobs:
           name: candidate-pkgbuild
           path: validated
 
-      - name: Install package smoke dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes binutils curl libarchive-tools xz-utils
-
       - name: Run native package smoke test
-        run: scripts/smoke-test-pkgbuild.sh validated/PKGBUILD
+        uses: ./.github/actions/native-package-smoke
+        with:
+          pkgbuild-paths: validated/PKGBUILD
 
   finalize:
     needs:
@@ -191,6 +187,19 @@ jobs:
           key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           known_hosts: ${{ secrets.KNOWN_HOSTS }}
           if_key_exists: replace
+
+      - name: Verify main has not advanced
+        if: github.ref == 'refs/heads/main'
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          TARGET_REF: ${{ github.ref }}
+        run: |
+          git fetch --no-tags origin "$TARGET_REF"
+          remote_sha=$(git rev-parse FETCH_HEAD)
+          if [[ "$remote_sha" != "$EXPECTED_SHA" ]]; then
+            echo "Main advanced from $EXPECTED_SHA to $remote_sha; refusing to publish a stale PKGBUILD." >&2
+            exit 1
+          fi
 
       - name: Publish AUR package
         if: github.ref == 'refs/heads/main'

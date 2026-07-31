@@ -1,8 +1,12 @@
 import { z } from "zod";
 
-import { channels } from "./lib/channels";
+import {
+	channelKeySchema,
+	channelTargetSchema,
+	type ChannelKey,
+} from "./lib/channels";
 
-export const channelKeySchema = z.enum(["nightly", "early-access"]);
+export { channelKeySchema };
 
 const upstreamVersionSchema = z
 	.string()
@@ -104,26 +108,12 @@ export const preparationPlanSchema = z.discriminatedUnion("status", [
 		package: versionSummarySchema,
 	}),
 ]);
-export const preparationResultSchema = z.discriminatedUnion("channel", [
-	z.object({
-		channel: z.literal("nightly"),
-		target: z.object({
-			pkgbuild_path: z.literal(channels.nightly.defaultPkgbuild),
-			aur_package: z.literal(channels.nightly.aurPackage),
-		}),
-		plan: preparationPlanSchema,
-	}),
-	z.object({
-		channel: z.literal("early-access"),
-		target: z.object({
-			pkgbuild_path: z.literal(channels["early-access"].defaultPkgbuild),
-			aur_package: z.literal(channels["early-access"].aurPackage),
-		}),
-		plan: preparationPlanSchema,
-	}),
-]);
+export const preparationResultSchema = z.object({
+	target: channelTargetSchema,
+	plan: preparationPlanSchema,
+});
 
-export type ChannelKey = z.infer<typeof channelKeySchema>;
+export type { ChannelKey };
 export type CurrentVersion = z.infer<typeof currentVersionSchema>;
 export type LatestVersion = z.infer<typeof latestVersionSchema>;
 export type PublicationDecision = z.infer<typeof publicationDecisionSchema>;

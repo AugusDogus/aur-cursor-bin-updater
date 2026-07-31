@@ -47,12 +47,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install package smoke dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes binutils curl libarchive-tools xz-utils
-
       - name: Native package smoke tests
-        run: |
-          scripts/smoke-test-pkgbuild.sh packaging/early-access/PKGBUILD
-          scripts/smoke-test-pkgbuild.sh packaging/nightly/PKGBUILD
+        uses: ./.github/actions/native-package-smoke
+        with:
+          pkgbuild-paths: |
+            packaging/early-access/PKGBUILD
+            packaging/nightly/PKGBUILD

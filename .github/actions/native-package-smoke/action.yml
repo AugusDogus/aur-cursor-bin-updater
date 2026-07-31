@@ -1,0 +1,27 @@
+name: Native package smoke test
+description: Build and validate one PKGBUILD on the runner's native architecture
+
+inputs:
+  pkgbuild-paths:
+    description: Newline-separated PKGBUILDs to validate
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install package smoke dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --yes binutils curl libarchive-tools xz-utils
+
+    - name: Run native package smoke test
+      shell: bash
+      env:
+        PKGBUILD_PATHS: ${{ inputs.pkgbuild-paths }}
+      run: |
+        while IFS= read -r pkgbuild_path; do
+          if [[ -n "$pkgbuild_path" ]]; then
+            scripts/smoke-test-pkgbuild.sh "$pkgbuild_path"
+          fi
+        done <<< "$PKGBUILD_PATHS"
