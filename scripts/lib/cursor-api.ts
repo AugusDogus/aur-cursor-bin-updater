@@ -1,9 +1,76 @@
 import { CryptoHasher } from "bun";
 
 import { latestVersionSchema, updateApiResponseSchema, type LatestVersion } from "../schemas";
+import {
+  Architecture,
+  type Architecture as ArchitectureDescriptor,
+} from "./architecture";
 import type { ChannelConfig } from "./channels";
 
 const USER_AGENT = "aur-cursor-bin-updater/1.0";
+
+export type CursorFetch = (
+  input: string,
+  init?: RequestInit,
+) => Promise<Response>;
+
+type ArchitectureRelease = {
+  architecture: ArchitectureDescriptor;
+  latest: LatestVersion | null;
+};
+
+type UnavailableArtifact = {
+  architecture: ArchitectureDescriptor;
+  url: string;
+  reason: string;
+};
+
+export type LatestRelease =
+  | {
+      status: "available";
+      latest: LatestVersion;
+    }
+  | {
+      status: "unavailable";
+      releases: ArchitectureRelease[];
+    }
+  | {
+      status: "architecture-mismatch";
+      releases: ArchitectureRelease[];
+    }
+  | {
+      status: "artifact-unavailable";
+      latest: LatestVersion;
+      artifacts: UnavailableArtifact[];
+    };
+
+export const LatestRelease = {
+  message(release: LatestRelease) {
+    switch (release.status) {
+      case "available":
+        return `Release ${release.latest.upstreamPkgver} is available for every supported architecture.`;
+      case "unavailable":
+        return "No update payload is available for any supported architecture.";
+      case "architecture-mismatch":
+        return `Architecture releases are not aligned: ${release.releases
+          .map(({ architecture, latest }) =>
+            latest
+              ? `${architecture.pkgbuild}=${latest.upstreamPkgver} (${latest.commit})`
+              : `${architecture.pkgbuild}=unavailable`,
+          )
+          .join(", ")}. The current package remains unchanged.`;
+      case "artifact-unavailable":
+        return `Release ${release.latest.upstreamPkgver} is not ready for every architecture: ${release.artifacts
+          .map(
+            ({ architecture, reason }) =>
+              `${architecture.pkgbuild} artifact failed availability check (${reason})`,
+          )
+          .join(", ")}. The current package remains unchanged.`;
+    }
+  },
+} as const;
+
+const defaultFetch: CursorFetch = (input, init) => fetch(input, init);
 
 function extractCommitFromDownloadUrl(downloadUrl: string) {
   const pathname = new URL(downloadUrl).pathname;
@@ -13,24 +80,33 @@ function extractCommitFromDownloadUrl(downloadUrl: string) {
   return segments[productionIndex + 1] ?? "";
 }
 
-function createDebUrl(latest: LatestVersion, arch: "amd64" | "arm64") {
-  const platform = arch === "amd64" ? "x64" : "arm64";
-  return `https://downloads.cursor.com/production/${latest.commit}/linux/${platform}/deb/${arch}/deb/cursor_${latest.upstreamPkgver}_${arch}.deb`;
+export function createDebUrl(
+  latest: LatestVersion,
+  architecture: ArchitectureDescriptor,
+) {
+  return `https://downloads.cursor.com/production/${latest.commit}/linux/${architecture.cursorPlatform}/deb/${architecture.deb}/deb/cursor_${latest.upstreamPkgver}_${architecture.deb}.deb`;
 }
 
-async function digestStream(reader: any, hash: CryptoHasher): Promise<string> {
-  const { done, value } = await reader.read();
-  if (done) return hash.digest("hex");
-  hash.update(value);
-  return digestStream(reader, hash);
+async function digestStream(
+  stream: ReadableStream<Uint8Array>,
+  hash: CryptoHasher,
+): Promise<string> {
+  for await (const value of stream) {
+    hash.update(value);
+  }
+  return hash.digest("hex");
 }
 
-export async function getLatestVersion(channel: ChannelConfig) {
+async function getLatestVersion(
+  channel: ChannelConfig,
+  architecture: ArchitectureDescriptor,
+  fetcher: CursorFetch,
+) {
   const machineHashPlaceholder = "deadbeef";
   const probePkgver = "0.0.0";
-  const updateUrl = `https://api2.cursor.sh/updates/api/update/linux-x64/cursor/${probePkgver}/${machineHashPlaceholder}/${channel.releaseTrack}`;
+  const updateUrl = `https://api2.cursor.sh/updates/api/update/${architecture.updatePlatform}/cursor/${probePkgver}/${machineHashPlaceholder}/${channel.releaseTrack}`;
 
-  const response = await fetch(updateUrl, {
+  const response = await fetcher(updateUrl, {
     headers: { "User-Agent": USER_AGENT },
     signal: AbortSignal.timeout(30_000),
   });
@@ -53,11 +129,85 @@ export async function getLatestVersion(channel: ChannelConfig) {
   });
 }
 
+async function checkDebAvailability(
+  latest: LatestVersion,
+  architecture: ArchitectureDescriptor,
+  fetcher: CursorFetch,
+): Promise<UnavailableArtifact | null> {
+  const url = createDebUrl(latest, architecture);
+
+  try {
+    const response = await fetcher(url, {
+      method: "HEAD",
+      headers: { "User-Agent": USER_AGENT },
+      signal: AbortSignal.timeout(30_000),
+    });
+    return response.ok
+      ? null
+      : {
+          architecture,
+          url,
+          reason: `HTTP ${response.status}`,
+        };
+  } catch (error: unknown) {
+    return {
+      architecture,
+      url,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export async function getLatestRelease(
+  channel: ChannelConfig,
+  fetcher: CursorFetch = defaultFetch,
+): Promise<LatestRelease> {
+  const releases = await Promise.all(
+    Architecture.all.map(async (architecture) => ({
+      architecture,
+      latest: await getLatestVersion(channel, architecture, fetcher),
+    })),
+  );
+  const reference = releases.find((release) => release.latest !== null)?.latest;
+
+  if (!reference) return { status: "unavailable", releases };
+
+  const mismatch = releases.some(
+    (release) =>
+      release.latest === null ||
+      release.latest.upstreamPkgver !== reference.upstreamPkgver ||
+      release.latest.commit !== reference.commit,
+  );
+  if (mismatch) return { status: "architecture-mismatch", releases };
+
+  const artifactChecks = await Promise.all(
+    Architecture.all.map((architecture) =>
+      checkDebAvailability(reference, architecture, fetcher),
+    ),
+  );
+  const artifacts: UnavailableArtifact[] = [];
+  for (const artifact of artifactChecks) {
+    if (artifact) artifacts.push(artifact);
+  }
+
+  return artifacts.length > 0
+    ? {
+        status: "artifact-unavailable",
+        latest: reference,
+        artifacts,
+      }
+    : {
+        status: "available",
+        latest: reference,
+      };
+}
+
 export async function computeDebSha512(
   latest: LatestVersion,
-  arch: "amd64" | "arm64" = "amd64",
+  architecture: ArchitectureDescriptor,
+  fetcher: CursorFetch = defaultFetch,
 ) {
-  const response = await fetch(createDebUrl(latest, arch), {
+  const response = await fetcher(createDebUrl(latest, architecture), {
     headers: { "User-Agent": USER_AGENT },
     signal: AbortSignal.timeout(300_000),
   });
@@ -66,5 +216,5 @@ export async function computeDebSha512(
     throw new Error(`Download failed: ${response.status} ${response.statusText}`);
 
   const hash = new CryptoHasher("sha512");
-  return digestStream(response.body.getReader(), hash);
+  return digestStream(response.body, hash);
 }

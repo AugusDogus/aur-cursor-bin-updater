@@ -1,6 +1,13 @@
 import { z } from "zod";
 
 export const channelKeySchema = z.enum(["nightly", "early-access"]);
+export const publicationStatusSchema = z.enum([
+	"update-available",
+	"up-to-date",
+	"release-unavailable",
+	"architecture-mismatch",
+	"artifact-unavailable",
+]);
 
 export const updateApiResponseSchema = z.looseObject({
 	version: z.string().min(1),
@@ -28,9 +35,10 @@ export const checkResultSchema = z.object({
 	latest_pkgver: z.string().min(1),
 	latest_upstream_pkgver: z.string().min(1),
 	latest_commit: z.string().min(1),
-	update_available: z.boolean(),
+	publication_status: publicationStatusSchema,
 });
 
 export type ChannelKey = z.infer<typeof channelKeySchema>;
 export type CurrentVersion = z.infer<typeof currentVersionSchema>;
 export type LatestVersion = z.infer<typeof latestVersionSchema>;
+export type PublicationStatus = z.infer<typeof publicationStatusSchema>;

@@ -5,6 +5,10 @@ import {
   type CurrentVersion,
   type LatestVersion,
 } from "../schemas";
+import {
+  Architecture,
+  type Architecture as ArchitectureDescriptor,
+} from "./architecture";
 
 function getScalarValue(lines: string[], key: string) {
   return lines
@@ -250,12 +254,23 @@ export async function parseSha512Sums(pkgbuildPath: string) {
 export async function updatePkgbuild(
   pkgbuildPath: string,
   latest: LatestVersion,
-  newSha512: { amd64: string; arm64: string },
+  newSha512: ReadonlyMap<ArchitectureDescriptor["pkgbuild"], string>,
 ) {
+  for (const architecture of Architecture.all) {
+    if (!newSha512.has(architecture.pkgbuild)) {
+      throw new Error(
+        `Missing checksum for PKGBUILD architecture ${architecture.pkgbuild}`,
+      );
+    }
+  }
+
   const lines = (await file(pkgbuildPath).text()).split("\n");
   const reduced = lines.reduce(
     (state, line) => {
       const trimmed = line.trim();
+      const checksumArchitecture = Architecture.all.find((architecture) =>
+        trimmed.startsWith(`${Architecture.sha512Field(architecture)}[0]=`),
+      );
       if (trimmed.startsWith("pkgver="))
         return {
           ...state,
@@ -279,18 +294,25 @@ export async function updatePkgbuild(
           lines: [...state.lines, `_commit=${latest.commit}`],
           sawCommit: true,
         };
-      if (trimmed.startsWith("sha512sums_x86_64[0]="))
+      if (checksumArchitecture) {
+        const checksum = newSha512.get(checksumArchitecture.pkgbuild);
+        if (checksum === undefined) {
+          throw new Error(
+            `Missing checksum for PKGBUILD architecture ${checksumArchitecture.pkgbuild}`,
+          );
+        }
         return {
           ...state,
-          lines: [...state.lines, `sha512sums_x86_64[0]=${newSha512.amd64}`],
-          sawShaAmd64: true,
+          lines: [
+            ...state.lines,
+            `${Architecture.sha512Field(checksumArchitecture)}[0]=${checksum}`,
+          ],
+          sawShaArchitectures: new Set([
+            ...state.sawShaArchitectures,
+            checksumArchitecture.pkgbuild,
+          ]),
         };
-      if (trimmed.startsWith("sha512sums_aarch64[0]="))
-        return {
-          ...state,
-          lines: [...state.lines, `sha512sums_aarch64[0]=${newSha512.arm64}`],
-          sawShaArm64: true,
-        };
+      }
       return {
         ...state,
         lines: [...state.lines, line],
@@ -301,19 +323,34 @@ export async function updatePkgbuild(
       sawPkgver: false,
       sawUpstreamPkgver: false,
       sawCommit: false,
-      sawShaAmd64: false,
-      sawShaArm64: false,
+      sawShaArchitectures: new Set<
+        ArchitectureDescriptor["pkgbuild"]
+      >(),
     },
   );
 
+  const missingShaFields = Architecture.all
+    .filter(
+      (architecture) =>
+        !reduced.sawShaArchitectures.has(architecture.pkgbuild),
+    )
+    .map((architecture) => `${Architecture.sha512Field(architecture)}[0]`);
   if (
     !reduced.sawPkgver ||
     !reduced.sawCommit ||
-    !reduced.sawShaAmd64 ||
-    !reduced.sawShaArm64
+    missingShaFields.length > 0
   )
     throw new Error(
-      "Missing one of pkgver/_commit/sha512sums_x86_64[0]/sha512sums_aarch64[0] in PKGBUILD",
+      [
+        "Missing required PKGBUILD fields.",
+        `Required: pkgver, _commit, ${Architecture.all
+          .map(
+            (architecture) =>
+              `${Architecture.sha512Field(architecture)}[0]`,
+          )
+          .join(", ")}.`,
+        `Missing checksum fields: ${missingShaFields.join(", ") || "none"}.`,
+      ].join(" "),
     );
 
   const finalLines = !reduced.sawUpstreamPkgver
@@ -348,26 +385,24 @@ export async function generateSrcinfo(pkgbuildPath: string) {
   const expandArray = (field: string) =>
     getExpandedArrayField(lines, field, vars);
 
-  const archSpecificFields = ["x86_64", "aarch64"].flatMap((arch) => {
-    const suffix = arch === "x86_64" ? "x86_64" : "aarch64";
-    return [
-      {
-        field: `source_${suffix}`,
-        values: expandArray(`source_${suffix}`),
-      },
-      {
-        field: `sha512sums_${suffix}`,
-        values: getExpandedArrayFieldWithOverrides(
-          lines,
-          `sha512sums_${suffix}`,
-          vars,
-        ),
-      },
-    ];
-  });
+  const architectures = expandArray("arch");
+  const archSpecificFields = architectures.flatMap((architecture) => [
+    {
+      field: `source_${architecture}`,
+      values: expandArray(`source_${architecture}`),
+    },
+    {
+      field: `sha512sums_${architecture}`,
+      values: getExpandedArrayFieldWithOverrides(
+        lines,
+        `sha512sums_${architecture}`,
+        vars,
+      ),
+    },
+  ]);
 
   const fields: Record<string, string[]> = {
-    arch: expandArray("arch"),
+    arch: architectures,
     license: expandArray("license"),
     makedepends: expandArray("makedepends"),
     depends: expandArray("depends"),

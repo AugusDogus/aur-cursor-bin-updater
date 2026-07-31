@@ -34,16 +34,16 @@ jobs:
           bun scripts/update.ts --check --channel nightly --pkgbuild packaging/nightly/PKGBUILD > check_result.json
           cat check_result.json
 
-          echo "update_available=$(jq -r '.update_available' check_result.json)" >> "$GITHUB_OUTPUT"
+          echo "publication_status=$(jq -r '.publication_status' check_result.json)" >> "$GITHUB_OUTPUT"
           echo "latest_version=$(jq -r '.latest_pkgver' check_result.json)" >> "$GITHUB_OUTPUT"
           echo "latest_commit=$(jq -r '.latest_commit' check_result.json)" >> "$GITHUB_OUTPUT"
 
       - name: Update packaging/nightly/PKGBUILD
-        if: steps.check.outputs.update_available == 'true' && !inputs.force_publish
+        if: steps.check.outputs.publication_status == 'update-available' && !inputs.force_publish
         run: bun scripts/update.ts --update --channel nightly --pkgbuild packaging/nightly/PKGBUILD
 
       - name: Commit channel PKGBUILD
-        if: steps.check.outputs.update_available == 'true' && !inputs.force_publish
+        if: steps.check.outputs.publication_status == 'update-available' && !inputs.force_publish
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
@@ -54,7 +54,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check branch and continue or stop workflow
-        if: steps.check.outputs.update_available == 'true' || inputs.force_publish
+        if: steps.check.outputs.publication_status == 'update-available' || inputs.force_publish
         run: |
           if [[ "${{ github.ref }}" == "refs/heads/development" ]]; then
             echo "On development branch, stopping workflow"
@@ -64,14 +64,14 @@ jobs:
           fi
 
       - name: Prepare PKGBUILD for AUR
-        if: (steps.check.outputs.update_available == 'true' || inputs.force_publish) && github.ref != 'refs/heads/development'
+        if: (steps.check.outputs.publication_status == 'update-available' || inputs.force_publish) && github.ref != 'refs/heads/development'
         uses: ./.github/actions/prepare-aur
         with:
           channel: nightly
           pkgbuild-path: packaging/nightly/PKGBUILD
 
       - name: Install SSH Key
-        if: (steps.check.outputs.update_available == 'true' || inputs.force_publish) && github.ref != 'refs/heads/development'
+        if: (steps.check.outputs.publication_status == 'update-available' || inputs.force_publish) && github.ref != 'refs/heads/development'
         uses: shimataro/ssh-key-action@v2
         with:
           key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
@@ -79,7 +79,7 @@ jobs:
           if_key_exists: replace
 
       - name: Publish AUR package
-        if: (steps.check.outputs.update_available == 'true' || inputs.force_publish) && github.ref != 'refs/heads/development'
+        if: (steps.check.outputs.publication_status == 'update-available' || inputs.force_publish) && github.ref != 'refs/heads/development'
         run: ./scripts/publish-aur.sh cursor-nightly-bin "Update nightly to version ${{ steps.check.outputs.latest_version }} (commit ${{ steps.check.outputs.latest_commit }})"
         env:
           AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
@@ -88,7 +88,7 @@ jobs:
       - name: Summary
         run: |
           echo "::group::Workflow Summary"
-          echo "Update available: ${{ steps.check.outputs.update_available }}"
+          echo "Publication status: ${{ steps.check.outputs.publication_status }}"
           echo "Force publish: ${{ inputs.force_publish }}"
           echo "Latest version: ${{ steps.check.outputs.latest_version }}"
           echo "Latest commit: ${{ steps.check.outputs.latest_commit }}"
