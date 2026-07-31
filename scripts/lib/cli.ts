@@ -10,7 +10,7 @@ import {
 } from "./channels";
 
 const usage =
-  "Usage: bun scripts/update.ts [--check|--update|--prepare] --channel <nightly|early-access> [--pkgbuild <path>] [--skip-checksum] [--force-publish], or bun scripts/update.ts --srcinfo --pkgbuild <path> [--srcinfo-path <path>]";
+  "Usage: bun scripts/update.ts [--check|--update] --channel <nightly|early-access> [--pkgbuild <path>] [--skip-checksum], or bun scripts/update.ts --prepare --channel <nightly|early-access> [--force-publish], or bun scripts/update.ts --srcinfo --pkgbuild <path> [--srcinfo-path <path>]";
 
 interface ChannelFileCommand {
   channel: ChannelKey;
@@ -26,7 +26,6 @@ export type CliCommand =
   | {
       mode: "prepare";
       target: ChannelTarget;
-      skipChecksum: boolean;
       forcePublish: boolean;
     }
   | {
@@ -107,12 +106,8 @@ export function parseCliOptions(args: string[]): CliCommand {
   if (options.srcinfoPath !== undefined && mode !== "srcinfo") {
     throw new Error("--srcinfo-path requires --srcinfo");
   }
-  if (
-    options.skipChecksum &&
-    mode !== "update" &&
-    mode !== "prepare"
-  ) {
-    throw new Error("--skip-checksum requires --update or --prepare");
+  if (options.skipChecksum && mode !== "update") {
+    throw new Error("--skip-checksum requires --update");
   }
   if (options.forcePublish && mode !== "prepare") {
     throw new Error("--force-publish requires --prepare");
@@ -143,7 +138,6 @@ export function parseCliOptions(args: string[]): CliCommand {
     return {
       mode,
       target: getChannelTarget(channel),
-      skipChecksum: options.skipChecksum ?? false,
       forcePublish: options.forcePublish ?? false,
     };
   }

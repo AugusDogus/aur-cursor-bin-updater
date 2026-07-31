@@ -74,6 +74,18 @@ test("computeDebSha512 downloads and hashes the requested architecture", async (
 });
 
 describe("getLatestRelease", () => {
+  test("rejects malformed download URLs as validation errors", async () => {
+    await expect(
+      getLatestRelease(
+        channel,
+        async () =>
+          new Response(
+            JSON.stringify({ version: "9.9.9", url: "not-a-url" }),
+          ),
+      ),
+    ).rejects.toThrow();
+  });
+
   test("returns one release only when every architecture matches", async () => {
     const requestedUrls: string[] = [];
     const result = await getLatestRelease(channel, async (input, init) => {
@@ -159,7 +171,7 @@ describe("getLatestRelease", () => {
   ])(
     "rejects shell-unsafe release metadata",
     async (version, releaseCommit) => {
-      expect(
+      await expect(
         getLatestRelease(channel, async (input) =>
           input.toString().includes("/linux-arm64/")
             ? updateResponse("arm64", version, releaseCommit)

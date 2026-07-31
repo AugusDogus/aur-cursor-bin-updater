@@ -105,7 +105,7 @@ export async function isAurPackageCurrent(
     remoteFiles = await readAurPackage(target.aur_package);
   } catch (error: unknown) {
     throw new Error(
-      `AUR comparison failed for ${target.aur_package}`,
+      `Remote AUR package ${target.aur_package} is unavailable or could not be read`,
       { cause: error },
     );
   }

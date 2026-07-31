@@ -43,7 +43,6 @@ describe("parseCliOptions", () => {
         pkgbuild_path: "packaging/nightly/PKGBUILD",
         aur_package: "cursor-nightly-bin",
       },
-      skipChecksum: false,
       forcePublish: true,
     });
     expect(() =>
@@ -96,7 +95,15 @@ describe("parseCliOptions", () => {
         "--channel",
         "nightly",
       ]),
-    ).toThrow("--skip-checksum requires --update or --prepare");
+    ).toThrow("--skip-checksum requires --update");
+    expect(() =>
+      parseCliOptions([
+        "--prepare",
+        "--skip-checksum",
+        "--channel",
+        "nightly",
+      ]),
+    ).toThrow("--skip-checksum requires --update");
     expect(() =>
       parseCliOptions([
         "--update",
@@ -106,5 +113,16 @@ describe("parseCliOptions", () => {
         "nightly",
       ]),
     ).toThrow("--srcinfo-path requires --srcinfo");
+  });
+
+  test("uses the channel PKGBUILD by default", () => {
+    expect(
+      parseCliOptions(["--update", "--channel", "nightly"]),
+    ).toEqual({
+      mode: "update",
+      channel: "nightly",
+      pkgbuildPath: "packaging/nightly/PKGBUILD",
+      skipChecksum: false,
+    });
   });
 });

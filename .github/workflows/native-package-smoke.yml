@@ -15,7 +15,7 @@ on:
       artifact_path:
         description: Directory where the optional artifact is extracted
         required: false
-        default: ""
+        default: "."
         type: string
 
 permissions:

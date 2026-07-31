@@ -23,11 +23,18 @@ const pkgverSchema = z
 const commitSchema = z
 	.string()
 	.regex(/^[0-9a-f]{40}$/, "Commit must be a 40-character lowercase Git hash");
-const cursorDownloadUrlSchema = z.string().url().refine(
-	(value) => {
+
+function isCursorDownloadUrl(value: string) {
+	try {
 		const url = new URL(value);
 		return url.protocol === "https:" && url.hostname === "downloads.cursor.com";
-	},
+	} catch {
+		return false;
+	}
+}
+
+const cursorDownloadUrlSchema = z.string().url().refine(
+	isCursorDownloadUrl,
 	"Download URL must use HTTPS on downloads.cursor.com",
 );
 

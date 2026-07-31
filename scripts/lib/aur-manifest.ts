@@ -57,18 +57,20 @@ export function serializeAurPublishManifest(
     .join("\n")}\n`;
 }
 
-export async function stageAurPackage(target: ChannelTarget) {
-  const files = await getAurPackageFiles(target);
-  await mkdir(aurStagingDirectory, { recursive: true });
+export async function stageAurFiles(
+  files: readonly AurPackageFile[],
+  stagingDirectory = aurStagingDirectory,
+) {
+  await mkdir(stagingDirectory, { recursive: true });
   await Promise.all(
     files.map(async ({ filename, mode, content }) => {
-      const stagedPath = join(aurStagingDirectory, filename);
+      const stagedPath = join(stagingDirectory, filename);
       await write(stagedPath, content);
       await chmod(stagedPath, mode === "755" ? 0o755 : 0o644);
     }),
   );
   await write(
-    join(aurStagingDirectory, aurPublishManifestName),
+    join(stagingDirectory, aurPublishManifestName),
     serializeAurPublishManifest(files),
   );
 
@@ -85,14 +87,18 @@ export async function stageAurPackage(target: ChannelTarget) {
     throw new Error("AUR manifest does not declare a PKGBUILD");
   }
   const checksumFailures = await getLocalSourceChecksumFailures(
-    join(aurStagingDirectory, pkgbuildFile.filename),
+    join(stagingDirectory, pkgbuildFile.filename),
     files
       .filter(({ validation }) => validation === "local-source")
-      .map(({ filename }) => join(aurStagingDirectory, filename)),
+      .map(({ filename }) => join(stagingDirectory, filename)),
   );
   if (checksumFailures.length > 0) {
     throw new Error(
       `Staged AUR checksum validation failed:\n${checksumFailures.join("\n")}`,
     );
   }
+}
+
+export async function stageAurPackage(target: ChannelTarget) {
+  await stageAurFiles(await getAurPackageFiles(target));
 }

@@ -31,22 +31,15 @@ checksum_array_name="sha512sums_${CARCH}"
 smoke_directory=$(mktemp -d)
 trap 'rm -rf -- "$smoke_directory"' EXIT
 
+# shellcheck source=/dev/null
 source "$pkgbuild_path"
 
 declare -n architecture_sources="$source_array_name"
 declare -n architecture_checksums="$checksum_array_name"
 
-source_entry=${architecture_sources[0]:-}
-expected_checksum=${architecture_checksums[0]:-}
-if [[ -z "$source_entry" || -z "$expected_checksum" ]]; then
+if (( ${#architecture_sources[@]} == 0 )) ||
+  (( ${#architecture_sources[@]} != ${#architecture_checksums[@]} )); then
   echo "Missing source or checksum for $CARCH in $pkgbuild_path" >&2
-  exit 1
-fi
-
-source_filename=${source_entry%%::*}
-source_url=${source_entry#*::}
-if [[ "$source_url" == "$source_entry" ]]; then
-  echo "Architecture source must use filename::URL syntax: $source_entry" >&2
   exit 1
 fi
 
@@ -54,22 +47,42 @@ srcdir="$smoke_directory/src"
 pkgdir="$smoke_directory/pkg"
 mkdir -p "$srcdir" "$pkgdir"
 
-curl \
-  --fail \
-  --location \
-  --retry 3 \
-  --show-error \
-  --output "$srcdir/$source_filename" \
-  "$source_url"
+for index in "${!architecture_sources[@]}"; do
+  source_entry=${architecture_sources[$index]:-}
+  expected_checksum=${architecture_checksums[$index]:-}
+  if [[ -z "$source_entry" || -z "$expected_checksum" || "$expected_checksum" == "SKIP" ]]; then
+    echo "Missing or unverifiable source checksum for $CARCH at index $index" >&2
+    exit 1
+  fi
 
-actual_checksum=$(sha512sum "$srcdir/$source_filename")
-actual_checksum=${actual_checksum%% *}
-if [[ "$actual_checksum" != "$expected_checksum" ]]; then
-  echo "Checksum mismatch for $source_filename" >&2
-  echo "Expected: $expected_checksum" >&2
-  echo "Actual:   $actual_checksum" >&2
-  exit 1
-fi
+  source_filename=${source_entry%%::*}
+  source_url=${source_entry#*::}
+  if [[ "$source_url" == "$source_entry" ]]; then
+    echo "Architecture source must use filename::URL syntax: $source_entry" >&2
+    exit 1
+  fi
+
+  curl \
+    --fail \
+    --location \
+    --proto '=https' \
+    --proto-redir '=https' \
+    --connect-timeout 15 \
+    --max-time 600 \
+    --retry 3 \
+    --show-error \
+    --output "$srcdir/$source_filename" \
+    "$source_url"
+
+  actual_checksum=$(sha512sum "$srcdir/$source_filename")
+  actual_checksum=${actual_checksum%% *}
+  if [[ "$actual_checksum" != "$expected_checksum" ]]; then
+    echo "Checksum mismatch for $source_filename" >&2
+    echo "Expected: $expected_checksum" >&2
+    echo "Actual:   $actual_checksum" >&2
+    exit 1
+  fi
+done
 
 install -Dm644 \
   "$repo_root/packaging/common/cursor.desktop" \
@@ -89,10 +102,10 @@ if [[ ! -x "$cursor_binary" ]]; then
   exit 1
 fi
 
-if ! readelf -h "$cursor_binary" |
-  grep -Fq "Machine:                           $expected_elf_machine"; then
+if ! LC_ALL=C readelf -h "$cursor_binary" |
+  grep -Eq "^[[:space:]]*Machine:[[:space:]]+$expected_elf_machine\$"; then
   echo "Packaged Cursor binary does not target $expected_elf_machine" >&2
-  readelf -h "$cursor_binary" >&2
+  LC_ALL=C readelf -h "$cursor_binary" >&2
   exit 1
 fi
 

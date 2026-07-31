@@ -41,7 +41,7 @@ describe("isAurPackageCurrent", () => {
 
   test("detects undeclared remote files", async () => {
     const files = await localAurFiles();
-    expect(
+    await expect(
       await isAurPackageCurrent(target, async () => [
         ...files,
         {
@@ -92,6 +92,8 @@ describe("isAurPackageCurrent", () => {
       isAurPackageCurrent(target, async () => {
         throw new Error("git clone failed");
       }),
-    ).rejects.toThrow("AUR comparison failed");
+    ).rejects.toThrow(
+      "Remote AUR package cursor-nightly-bin is unavailable or could not be read",
+    );
   });
 });

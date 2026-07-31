@@ -37,6 +37,7 @@ Requires [Bun](https://bun.sh/). From the repo root:
 ```bash
 bun scripts/update.ts --check --channel early-access
 bun scripts/update.ts --update --channel nightly
+bun scripts/update.ts --prepare --channel nightly
 bun scripts/update.ts --srcinfo --pkgbuild packaging/early-access/PKGBUILD
 ```
 
@@ -45,6 +46,12 @@ bun scripts/update.ts --srcinfo --pkgbuild packaging/early-access/PKGBUILD
 downloadable update is available. This replaces the former flat
 `update_available` and `latest_*` fields, so scripts consuming the old JSON
 shape must migrate to `current` and `publication`.
+
+`--prepare` evaluates release and AUR state atomically, updates the canonical
+channel PKGBUILD when required, and prints the publication plan consumed by CI.
+Use `--force-publish` with `--prepare` to republish the current package. The
+`--skip-checksum` development option is restricted to `--update` and cannot
+produce a publishable plan.
 
 Run `bun scripts/update.ts --help` for additional flags.
 

@@ -13,7 +13,6 @@ import {
 const command: Extract<CliCommand, { mode: "prepare" }> = {
   mode: "prepare",
   target: getChannelTarget("early-access"),
-  skipChecksum: false,
   forcePublish: false,
 };
 
@@ -114,7 +113,7 @@ describe("preparePublication", () => {
   });
 
   test("reports release discovery errors when AUR is current", async () => {
-    expect(
+    await expect(
       preparePublication(command, {
         getLatestRelease: async () => {
           throw new Error("Cursor API is unavailable");
@@ -149,12 +148,10 @@ describe("preparePublication", () => {
     let appliedVersion = "";
 
     const result = await preparePublication(
-      { ...command, skipChecksum: true },
+      command,
       {
         getLatestRelease: async () => release,
-        computeDebSha512: async () => {
-          throw new Error("Checksums should be skipped");
-        },
+        computeDebSha512: async () => "test-checksum",
         isAurPackageCurrent: async () => false,
         updatePkgbuild: async (_path, latest) => {
           appliedVersion = latest.pkgver;
@@ -184,12 +181,10 @@ describe("preparePublication", () => {
     );
 
     const result = await preparePublication(
-      { ...command, skipChecksum: true },
+      command,
       {
         getLatestRelease: async () => release,
-        computeDebSha512: async () => {
-          throw new Error("Checksums should be skipped");
-        },
+        computeDebSha512: async () => "test-checksum",
         isAurPackageCurrent: async () => {
           throw new Error("AUR is temporarily unavailable");
         },

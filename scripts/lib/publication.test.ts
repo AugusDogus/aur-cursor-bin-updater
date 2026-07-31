@@ -190,6 +190,18 @@ describe("PublicationPlan", () => {
       status: "failed",
       errors: [releaseError],
     });
+
+    const aurError = new Error("AUR comparison unavailable");
+    expect(
+      PublicationPlan.prepare(current, {
+        status: "observed",
+        aur: { status: "failed", error: aurError },
+        release: { status: "failed", error: releaseError },
+      }),
+    ).toEqual({
+      status: "failed",
+      errors: [releaseError, aurError],
+    });
   });
 
   test("rejects a channel paired with another package target", () => {

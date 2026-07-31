@@ -84,7 +84,7 @@ async function applyLatestVersion(
 ) {
   const checksums = await Architecture.mapValues(
     async (architecture) =>
-      command.skipChecksum
+      command.mode === "update" && command.skipChecksum
         ? "SKIP"
         : await dependencies.computeDebSha512(latest, architecture),
   );

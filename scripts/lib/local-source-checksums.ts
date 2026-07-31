@@ -16,9 +16,19 @@ function isRemoteSource(sourceEntry: string) {
   const { location } = getSourceParts(sourceEntry);
   const candidate = location ?? sourceEntry;
 
-  return ["http://", "https://", "ftp://", "git+"].some((prefix) =>
-    candidate.startsWith(prefix),
-  );
+  return [
+    "bzr+",
+    "fossil+",
+    "ftp://",
+    "ftps://",
+    "git+",
+    "git://",
+    "hg+",
+    "http://",
+    "https://",
+    "rsync://",
+    "svn+",
+  ].some((prefix) => candidate.startsWith(prefix));
 }
 
 function getSourceFilename(sourceEntry: string) {
@@ -114,6 +124,11 @@ export async function getLocalSourceChecksumFailures(
         if (!expected) {
           return [
             `Missing sha512sums entry ${sourceIndex} for ${sourceResult.sourcePath}`,
+          ];
+        }
+        if (expected === "SKIP") {
+          return [
+            `Local source checksum cannot be SKIP: ${sourceResult.sourcePath}`,
           ];
         }
 

@@ -12,6 +12,19 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      AUR_SSH_PRIVATE_KEY:
+        description: SSH private key used to publish AUR packages
+        required: true
+      KNOWN_HOSTS:
+        description: SSH known-hosts entries for the AUR host
+        required: true
+      AUR_EMAIL:
+        description: Email used for AUR commits
+        required: true
+      AUR_USERNAME:
+        description: Username used for AUR commits
+        required: true
 
 permissions:
   contents: read
@@ -160,8 +173,12 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add "$PKGBUILD_PATH"
-          git commit -m "Update $CHANNEL PKGBUILD to version $PACKAGE_VERSION (commit $PACKAGE_COMMIT)"
-          git push origin "HEAD:$TARGET_REF"
+          if git diff --cached --quiet -- "$PKGBUILD_PATH"; then
+            echo "PKGBUILD already committed; reusing HEAD."
+          else
+            git commit -m "Update $CHANNEL PKGBUILD to version $PACKAGE_VERSION (commit $PACKAGE_COMMIT)"
+            git push origin "HEAD:$TARGET_REF"
+          fi
           echo "publication_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   publish-aur:
