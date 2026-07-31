@@ -10,7 +10,10 @@ materialize_aur_payload() {
   local source_directory=$2
   local destination_directory=$3
   local file_count=0
-  local mode filename source_path
+  local pkgbuild_count=0
+  local mode filename source_path index
+  local -a modes=() filenames=()
+  local -A seen_filenames=()
 
   if [[ ! -f "$manifest_path" ]]; then
     echo "Missing AUR publication manifest: $manifest_path" >&2
@@ -29,18 +32,41 @@ materialize_aur_payload() {
       echo "Invalid AUR filename in $manifest_path: $filename" >&2
       return 1
     fi
-
-    source_path="$source_directory/$filename"
-    if [[ ! -f "$source_path" ]]; then
-      echo "Missing staged AUR file: $source_path" >&2
+    if [[ ${seen_filenames["$filename"]+present} ]]; then
+      echo "Duplicate AUR filename in $manifest_path: $filename" >&2
       return 1
     fi
-    install -m"$mode" "$source_path" "$destination_directory/$filename"
+    seen_filenames["$filename"]=1
+    modes+=("$mode")
+    filenames+=("$filename")
     file_count=$((file_count + 1))
+    if [[ "$filename" == "PKGBUILD" ]]; then
+      pkgbuild_count=$((pkgbuild_count + 1))
+    fi
   done < "$manifest_path"
 
   if (( file_count == 0 )); then
     echo "AUR publication manifest is empty: $manifest_path" >&2
     return 1
   fi
+  if (( pkgbuild_count != 1 )); then
+    echo "AUR publication manifest must contain exactly one PKGBUILD, found $pkgbuild_count" >&2
+    return 1
+  fi
+
+  for filename in "${filenames[@]}"; do
+    source_path="$source_directory/$filename"
+    if [[ ! -f "$source_path" ]]; then
+      echo "Missing staged AUR file: $source_path" >&2
+      return 1
+    fi
+  done
+
+  for index in "${!filenames[@]}"; do
+    mode=${modes[$index]}
+    filename=${filenames[$index]}
+    install -m"$mode" \
+      "$source_directory/$filename" \
+      "$destination_directory/$filename"
+  done
 }

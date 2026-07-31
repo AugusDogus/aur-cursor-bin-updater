@@ -86,6 +86,18 @@ describe("AUR manifest", () => {
     );
   });
 
+  test("ties pkgbuild validation to the PKGBUILD filename at typecheck time", () => {
+    // @ts-expect-error The pkgbuild role requires the literal PKGBUILD filename.
+    const invalidFile: AurPackageFile = {
+      filename: "metadata",
+      mode: "644",
+      content: "invalid",
+      validation: "pkgbuild",
+    };
+
+    expect(invalidFile.filename).toBe("metadata");
+  });
+
   test("requires exactly one PKGBUILD", async () => {
     await expect(
       stageAurFiles([], await temporaryDirectory()),

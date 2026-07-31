@@ -106,7 +106,16 @@ describe("materialize_aur_payload", () => {
         expectedError: "Invalid AUR filename",
       },
       {
-        manifest: "644\tmissing-file\n",
+        manifest: "644\tPKGBUILD\n644\tPKGBUILD\n",
+        expectedError: "Duplicate AUR filename",
+      },
+      {
+        manifest: "644\tcursor.desktop\n",
+        expectedError:
+          "AUR publication manifest must contain exactly one PKGBUILD",
+      },
+      {
+        manifest: "644\tPKGBUILD\n",
         expectedError: "Missing staged AUR file",
       },
     ];

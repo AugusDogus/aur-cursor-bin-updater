@@ -16,12 +16,22 @@ export const aurStagingDirectory = ".aur";
 export const aurPublishManifestName = ".publish-manifest";
 const aurFilenamePattern = /^[A-Za-z0-9._-]+$/;
 
-export type AurPackageFile = {
-  filename: string;
+type AurPackageFileContents = {
   mode: "644" | "755";
   content: string;
-  validation: "pkgbuild" | "local-source" | "none";
 };
+
+export type AurPackageFile = AurPackageFileContents &
+  (
+    | {
+        filename: "PKGBUILD";
+        validation: "pkgbuild";
+      }
+    | {
+        filename: string;
+        validation: "local-source" | "none";
+      }
+  );
 
 export async function getAurPackageFiles(
   target: ChannelTarget,
