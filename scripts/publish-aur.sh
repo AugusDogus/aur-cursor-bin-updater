@@ -33,6 +33,10 @@ trap 'rm -rf "$tmpdir"' EXIT
 
 git clone "$aur_ssh_url" "$tmpdir"
 
+# The manifest describes the complete AUR payload. Removing the tracked
+# worktree first ensures deleted manifest entries are deleted remotely.
+git -C "$tmpdir" rm -r --ignore-unmatch -- . >/dev/null
+
 published_files=()
 while IFS=$'\t' read -r mode filename; do
   if [[ -z "$mode" && -z "$filename" ]]; then
@@ -62,7 +66,7 @@ fi
 
 git -C "$tmpdir" config user.name "$AUR_USERNAME"
 git -C "$tmpdir" config user.email "$AUR_EMAIL"
-git -C "$tmpdir" add -- "${published_files[@]}"
+git -C "$tmpdir" add -A -- .
 
 if git -C "$tmpdir" diff --cached --quiet; then
   echo "No AUR changes to publish for $pkgname."

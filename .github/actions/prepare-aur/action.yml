@@ -9,16 +9,8 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Stage AUR files
+    - name: Stage and validate AUR files
       shell: bash
       env:
         CHANNEL: ${{ inputs.channel }}
       run: bun scripts/stage-aur.ts --channel "$CHANNEL"
-
-    - name: Verify local source checksums
-      shell: bash
-      run: |
-        bun scripts/verify-local-source-checksums.ts \
-          --pkgbuild .aur/PKGBUILD \
-          --source .aur/cursor.desktop \
-          --source .aur/cursor-launcher.sh
