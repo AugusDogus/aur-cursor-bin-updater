@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+script_directory=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=lib/aur-payload.sh
+source "$script_directory/lib/aur-payload.sh"
+
 if (( $# != 1 )); then
   echo "Usage: scripts/smoke-test-pkgbuild.sh <PKGBUILD>" >&2
   exit 2
@@ -10,11 +14,6 @@ fi
 pkgbuild_path=$(realpath "$1")
 pkgbuild_directory=$(dirname "$pkgbuild_path")
 publish_manifest="$pkgbuild_directory/.publish-manifest"
-
-if [[ ! -f "$publish_manifest" ]]; then
-  echo "Missing AUR publication manifest: $publish_manifest" >&2
-  exit 1
-fi
 
 case "$(uname -m)" in
   x86_64)
@@ -90,27 +89,7 @@ for index in "${!architecture_sources[@]}"; do
   fi
 done
 
-while IFS=$'\t' read -r mode filename; do
-  case "$filename" in
-    PKGBUILD | .SRCINFO)
-      continue
-      ;;
-  esac
-  if [[ "$mode" != "644" && "$mode" != "755" ]]; then
-    echo "Invalid AUR file mode in $publish_manifest: $mode" >&2
-    exit 1
-  fi
-  if [[ ! "$filename" =~ ^[A-Za-z0-9._-]+$ ]]; then
-    echo "Invalid AUR filename in $publish_manifest: $filename" >&2
-    exit 1
-  fi
-  payload_file="$pkgbuild_directory/$filename"
-  if [[ ! -f "$payload_file" ]]; then
-    echo "Missing staged AUR file: $payload_file" >&2
-    exit 1
-  fi
-  install -m"$mode" "$payload_file" "$srcdir/$filename"
-done < "$publish_manifest"
+materialize_aur_payload "$publish_manifest" "$pkgbuild_directory" "$srcdir"
 
 (
   cd "$srcdir"
