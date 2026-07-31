@@ -14,6 +14,7 @@ import { generateSrcinfo } from "./pkgbuild";
 
 export const aurStagingDirectory = ".aur";
 export const aurPublishManifestName = ".publish-manifest";
+const aurFilenamePattern = /^[A-Za-z0-9._-]+$/;
 
 export type AurPackageFile = {
   filename: string;
@@ -63,6 +64,35 @@ export function serializeAurPublishManifest(
     .join("\n")}\n`;
 }
 
+function validateAurPackageFiles(
+  files: readonly AurPackageFile[],
+) {
+  const filenames = new Set<string>();
+  for (const { filename } of files) {
+    if (!aurFilenamePattern.test(filename)) {
+      throw new Error(`Invalid AUR filename: ${filename}`);
+    }
+    if (filenames.has(filename)) {
+      throw new Error(`AUR manifest contains duplicate filename: ${filename}`);
+    }
+    filenames.add(filename);
+  }
+
+  const pkgbuildFiles = files.filter(
+    ({ validation }) => validation === "pkgbuild",
+  );
+  if (pkgbuildFiles.length !== 1) {
+    throw new Error(
+      `AUR manifest must declare exactly one PKGBUILD, found ${pkgbuildFiles.length}`,
+    );
+  }
+  const pkgbuildFile = pkgbuildFiles[0];
+  if (pkgbuildFile === undefined) {
+    throw new Error("AUR manifest does not declare a PKGBUILD");
+  }
+  return pkgbuildFile;
+}
+
 function hasErrorCode(error: unknown, code: string) {
   return error instanceof Error && "code" in error && error.code === code;
 }
@@ -106,6 +136,7 @@ export async function stageAurFiles(
   files: readonly AurPackageFile[],
   stagingDirectory = aurStagingDirectory,
 ) {
+  const pkgbuildFile = validateAurPackageFiles(files);
   const destinationDirectory = resolve(stagingDirectory);
   const parentDirectory = dirname(destinationDirectory);
   const destinationName = basename(destinationDirectory);
@@ -123,18 +154,6 @@ export async function stageAurFiles(
       }),
     );
 
-    const pkgbuildFiles = files.filter(
-      ({ validation }) => validation === "pkgbuild",
-    );
-    if (pkgbuildFiles.length !== 1) {
-      throw new Error(
-        `AUR manifest must declare exactly one PKGBUILD, found ${pkgbuildFiles.length}`,
-      );
-    }
-    const pkgbuildFile = pkgbuildFiles[0];
-    if (pkgbuildFile === undefined) {
-      throw new Error("AUR manifest does not declare a PKGBUILD");
-    }
     const checksumFailures = await getLocalSourceChecksumFailures(
       join(temporaryDirectory, pkgbuildFile.filename),
       files

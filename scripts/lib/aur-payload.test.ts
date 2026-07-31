@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -77,24 +84,54 @@ describe("materialize_aur_payload", () => {
     ).toBe(0o755);
   });
 
-  test("rejects an empty manifest", async () => {
-    const root = await temporaryDirectory();
-    const sourceDirectory = join(root, "source");
-    const destinationDirectory = join(root, "destination");
-    const manifestPath = join(sourceDirectory, ".publish-manifest");
-    await Promise.all([
-      mkdir(sourceDirectory),
-      mkdir(destinationDirectory),
-    ]);
-    await writeFile(manifestPath, "");
+  test("rejects every invalid manifest boundary", async () => {
+    const rejectionCases: readonly {
+      manifest: string | undefined;
+      expectedError: string;
+    }[] = [
+      {
+        manifest: undefined,
+        expectedError: "Missing AUR publication manifest",
+      },
+      {
+        manifest: "",
+        expectedError: "AUR publication manifest is empty",
+      },
+      {
+        manifest: "600\tPKGBUILD\n",
+        expectedError: "Invalid AUR file mode",
+      },
+      {
+        manifest: "644\t../escaped\n",
+        expectedError: "Invalid AUR filename",
+      },
+      {
+        manifest: "644\tmissing-file\n",
+        expectedError: "Missing staged AUR file",
+      },
+    ];
 
-    const result = await materialize(
-      manifestPath,
-      sourceDirectory,
-      destinationDirectory,
-    );
+    for (const { manifest, expectedError } of rejectionCases) {
+      const root = await temporaryDirectory();
+      const sourceDirectory = join(root, "source");
+      const destinationDirectory = join(root, "destination");
+      const manifestPath = join(sourceDirectory, ".publish-manifest");
+      await Promise.all([
+        mkdir(sourceDirectory),
+        mkdir(destinationDirectory),
+      ]);
+      if (manifest !== undefined) {
+        await writeFile(manifestPath, manifest);
+      }
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("AUR publication manifest is empty");
+      const result = await materialize(
+        manifestPath,
+        sourceDirectory,
+        destinationDirectory,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(expectedError);
+    }
   });
 });

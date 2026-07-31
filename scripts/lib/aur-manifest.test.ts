@@ -94,6 +94,65 @@ describe("AUR manifest", () => {
     );
   });
 
+  test("rejects unsafe filenames before staging", async () => {
+    const parentDirectory = await temporaryDirectory();
+    const stagingDirectory = join(parentDirectory, ".aur");
+
+    await expect(
+      stageAurFiles(
+        [
+          {
+            filename: "../escaped",
+            mode: "644",
+            content: "unsafe",
+            validation: "none",
+          },
+          {
+            filename: "PKGBUILD",
+            mode: "644",
+            content: "source=()\nsha512sums=()\n",
+            validation: "pkgbuild",
+          },
+        ],
+        stagingDirectory,
+      ),
+    ).rejects.toThrow("Invalid AUR filename: ../escaped");
+    expect(await file(join(parentDirectory, "escaped")).exists()).toBe(
+      false,
+    );
+    expect(await file(stagingDirectory).exists()).toBe(false);
+  });
+
+  test("rejects duplicate filenames before staging", async () => {
+    const stagingDirectory = join(
+      await temporaryDirectory(),
+      ".aur",
+    );
+
+    await expect(
+      stageAurFiles(
+        [
+          {
+            filename: "PKGBUILD",
+            mode: "644",
+            content: "source=()\nsha512sums=()\n",
+            validation: "pkgbuild",
+          },
+          {
+            filename: "PKGBUILD",
+            mode: "644",
+            content: "replacement",
+            validation: "none",
+          },
+        ],
+        stagingDirectory,
+      ),
+    ).rejects.toThrow(
+      "AUR manifest contains duplicate filename: PKGBUILD",
+    );
+    expect(await file(stagingDirectory).exists()).toBe(false);
+  });
+
   test("rejects staged local-source checksum mismatches", async () => {
     const files: readonly AurPackageFile[] = [
       {
