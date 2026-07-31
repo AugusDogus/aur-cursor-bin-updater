@@ -5,14 +5,15 @@ import { channelKeySchema, type ChannelKey } from "../schemas";
 import { getChannelConfig } from "./channels";
 
 const usage =
-  "Usage: bun scripts/update.ts [--check|--update|--srcinfo] --channel <nightly|early-access> [--pkgbuild <path>] [--srcinfo-path <path>] [--skip-checksum]";
+  "Usage: bun scripts/update.ts [--check|--update|--prepare|--srcinfo] --channel <nightly|early-access> [--pkgbuild <path>] [--srcinfo-path <path>] [--skip-checksum] [--force-publish]";
 
 export interface CliOptions {
-  mode: "check" | "update" | "srcinfo";
+  mode: "check" | "update" | "prepare" | "srcinfo";
   channel: ChannelKey;
   pkgbuildPath: string;
   srcinfoPath: string;
   skipChecksum: boolean;
+  forcePublish: boolean;
 }
 
 export function getUsageText() {
@@ -33,11 +34,13 @@ export function parseCliOptions(args: string[]): CliOptions {
     .allowExcessArguments(false)
     .option("--check", "Output update check JSON")
     .option("--update", "Update PKGBUILD in place")
+    .option("--prepare", "Prepare a PKGBUILD and output its publication plan")
     .option("--srcinfo", "Generate .SRCINFO from PKGBUILD")
     .requiredOption("--channel <channel>", "nightly or early-access")
     .option("--pkgbuild <path>", "Path to PKGBUILD")
     .option("--srcinfo-path <path>", "Path to .SRCINFO output")
-    .option("--skip-checksum", "Skip .deb checksum fetch when updating");
+    .option("--skip-checksum", "Skip .deb checksum fetch when updating")
+    .option("--force-publish", "Prepare the current PKGBUILD for publication");
 
   try {
     program.parse(args, { from: "user" });
@@ -48,15 +51,18 @@ export function parseCliOptions(args: string[]): CliOptions {
   const options = program.opts<{
     check?: boolean;
     update?: boolean;
+    prepare?: boolean;
     srcinfo?: boolean;
     channel: string;
     pkgbuild?: string;
     srcinfoPath?: string;
     skipChecksum?: boolean;
+    forcePublish?: boolean;
   }>();
   const selectedModes = [
     options.check ? "check" : null,
     options.update ? "update" : null,
+    options.prepare ? "prepare" : null,
     options.srcinfo ? "srcinfo" : null,
   ].filter((value) => value !== null);
   if (selectedModes.length === 0) throw new Error(usage);
@@ -70,6 +76,10 @@ export function parseCliOptions(args: string[]): CliOptions {
   const srcinfoPath =
     options.srcinfoPath ?? `${dirname(pkgbuildPath)}/.SRCINFO`;
   const skipChecksum = options.skipChecksum ?? false;
+  const forcePublish = options.forcePublish ?? false;
+  if (forcePublish && mode !== "prepare") {
+    throw new Error("--force-publish requires --prepare");
+  }
 
   return {
     mode,
@@ -77,5 +87,6 @@ export function parseCliOptions(args: string[]): CliOptions {
     pkgbuildPath,
     srcinfoPath,
     skipChecksum,
+    forcePublish,
   };
 }

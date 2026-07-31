@@ -4,6 +4,7 @@ import { latestVersionSchema, updateApiResponseSchema, type LatestVersion } from
 import {
   Architecture,
   type Architecture as ArchitectureDescriptor,
+  type ArchitectureValues,
 } from "./architecture";
 import type { ChannelConfig } from "./channels";
 
@@ -14,37 +15,105 @@ export type CursorFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
-type ArchitectureRelease = {
-  architecture: ArchitectureDescriptor;
-  latest: LatestVersion | null;
-};
-
 type UnavailableArtifact = {
-  architecture: ArchitectureDescriptor;
   url: string;
   reason: string;
 };
 
-export type LatestRelease =
+type ReportedUnavailableArtifact = UnavailableArtifact & {
+  architecture: ArchitectureDescriptor;
+};
+
+type NonEmptyArray<Value> = readonly [Value, ...Value[]];
+type ArchitectureReleases = ArchitectureValues<LatestVersion | null>;
+type ArtifactChecks = ArchitectureValues<UnavailableArtifact | null>;
+
+const latestReleaseBrand = Symbol("LatestRelease");
+interface LatestReleaseBrand {
+  readonly [latestReleaseBrand]: true;
+}
+
+type LatestReleaseState =
   | {
       status: "available";
       latest: LatestVersion;
+      releases: ArchitectureValues<LatestVersion>;
     }
   | {
       status: "unavailable";
-      releases: ArchitectureRelease[];
+      releases: ArchitectureValues<null>;
     }
   | {
       status: "architecture-mismatch";
-      releases: ArchitectureRelease[];
+      releases: ArchitectureReleases;
     }
   | {
       status: "artifact-unavailable";
       latest: LatestVersion;
-      artifacts: UnavailableArtifact[];
+      releases: ArchitectureValues<LatestVersion>;
+      artifacts: NonEmptyArray<ReportedUnavailableArtifact>;
     };
 
+export type LatestRelease = LatestReleaseState & LatestReleaseBrand;
+
+const brandValue: true = true;
+
+function brandLatestRelease<State extends LatestReleaseState>(
+  state: State,
+): State & LatestReleaseBrand {
+  return Object.assign(state, { [latestReleaseBrand]: brandValue });
+}
+
 export const LatestRelease = {
+  fromArchitectureResults(
+    releases: ArchitectureReleases,
+    artifactChecks: ArtifactChecks,
+  ): LatestRelease {
+    const x86_64 = releases.x86_64;
+    const aarch64 = releases.aarch64;
+    if (x86_64 === null && aarch64 === null) {
+      return brandLatestRelease({
+        status: "unavailable",
+        releases: { x86_64: null, aarch64: null },
+      });
+    }
+    if (
+      x86_64 === null ||
+      aarch64 === null ||
+      x86_64.upstreamPkgver !== aarch64.upstreamPkgver ||
+      x86_64.commit !== aarch64.commit
+    ) {
+      return brandLatestRelease({
+        status: "architecture-mismatch",
+        releases,
+      });
+    }
+
+    const alignedReleases = { x86_64, aarch64 };
+    const unavailableArtifacts = Architecture.all.flatMap((architecture) => {
+      const artifact = artifactChecks[architecture.pkgbuild];
+      return artifact ? [{ architecture, ...artifact }] : [];
+    });
+    const [firstUnavailableArtifact, ...remainingUnavailableArtifacts] =
+      unavailableArtifacts;
+    if (firstUnavailableArtifact) {
+      return brandLatestRelease({
+        status: "artifact-unavailable",
+        latest: x86_64,
+        releases: alignedReleases,
+        artifacts: [
+          firstUnavailableArtifact,
+          ...remainingUnavailableArtifacts,
+        ],
+      });
+    }
+
+    return brandLatestRelease({
+      status: "available",
+      latest: x86_64,
+      releases: alignedReleases,
+    });
+  },
   message(release: LatestRelease) {
     switch (release.status) {
       case "available":
@@ -52,12 +121,13 @@ export const LatestRelease = {
       case "unavailable":
         return "No update payload is available for any supported architecture.";
       case "architecture-mismatch":
-        return `Architecture releases are not aligned: ${release.releases
-          .map(({ architecture, latest }) =>
-            latest
+        return `Architecture releases are not aligned: ${Architecture.all
+          .map((architecture) => {
+            const latest = release.releases[architecture.pkgbuild];
+            return latest
               ? `${architecture.pkgbuild}=${latest.upstreamPkgver} (${latest.commit})`
-              : `${architecture.pkgbuild}=unavailable`,
-          )
+              : `${architecture.pkgbuild}=unavailable`;
+          })
           .join(", ")}. The current package remains unchanged.`;
       case "artifact-unavailable":
         return `Release ${release.latest.upstreamPkgver} is not ready for every architecture: ${release.artifacts
@@ -145,13 +215,11 @@ async function checkDebAvailability(
     return response.ok
       ? null
       : {
-          architecture,
           url,
           reason: `HTTP ${response.status}`,
         };
   } catch (error: unknown) {
     return {
-      architecture,
       url,
       reason: error instanceof Error ? error.message : String(error),
     };
@@ -162,44 +230,22 @@ export async function getLatestRelease(
   channel: ChannelConfig,
   fetcher: CursorFetch = defaultFetch,
 ): Promise<LatestRelease> {
-  const releases = await Promise.all(
-    Architecture.all.map(async (architecture) => ({
-      architecture,
-      latest: await getLatestVersion(channel, architecture, fetcher),
-    })),
+  const releases = await Architecture.mapValues(
+    async (architecture) =>
+      await getLatestVersion(channel, architecture, fetcher),
   );
-  const reference = releases.find((release) => release.latest !== null)?.latest;
+  const metadataRelease = LatestRelease.fromArchitectureResults(releases, {
+    x86_64: null,
+    aarch64: null,
+  });
+  if (metadataRelease.status !== "available") return metadataRelease;
 
-  if (!reference) return { status: "unavailable", releases };
-
-  const mismatch = releases.some(
-    (release) =>
-      release.latest === null ||
-      release.latest.upstreamPkgver !== reference.upstreamPkgver ||
-      release.latest.commit !== reference.commit,
+  const artifactChecks = await Architecture.mapValues(
+    async (architecture) =>
+      await checkDebAvailability(metadataRelease.latest, architecture, fetcher),
   );
-  if (mismatch) return { status: "architecture-mismatch", releases };
 
-  const artifactChecks = await Promise.all(
-    Architecture.all.map((architecture) =>
-      checkDebAvailability(reference, architecture, fetcher),
-    ),
-  );
-  const artifacts: UnavailableArtifact[] = [];
-  for (const artifact of artifactChecks) {
-    if (artifact) artifacts.push(artifact);
-  }
-
-  return artifacts.length > 0
-    ? {
-        status: "artifact-unavailable",
-        latest: reference,
-        artifacts,
-      }
-    : {
-        status: "available",
-        latest: reference,
-      };
+  return LatestRelease.fromArchitectureResults(releases, artifactChecks);
 }
 
 export async function computeDebSha512(

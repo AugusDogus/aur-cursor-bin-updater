@@ -152,4 +152,21 @@ describe("getLatestRelease", () => {
 
     expect(result.status).toBe("unavailable");
   });
+
+  test.each([
+    ["9.9.9; touch /tmp/injected", commit],
+    ["9.9.9\n_commit=bad", commit],
+    ["9.9.9", "not-a-git-hash"],
+  ])(
+    "rejects shell-unsafe release metadata",
+    async (version, releaseCommit) => {
+      expect(
+        getLatestRelease(channel, async (input) =>
+          input.toString().includes("/linux-arm64/")
+            ? updateResponse("arm64", version, releaseCommit)
+            : updateResponse("x64", version, releaseCommit),
+        ),
+      ).rejects.toThrow();
+    },
+  );
 });

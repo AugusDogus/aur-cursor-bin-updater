@@ -22,20 +22,20 @@ on:
         default: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   prepare:
     runs-on: ubuntu-24.04
     outputs:
-      publication_status: ${{ steps.prepare.outputs.publication_status }}
-      should_process: ${{ steps.prepare.outputs.should_process }}
-      should_commit: ${{ steps.prepare.outputs.should_commit }}
+      plan_status: ${{ steps.prepare.outputs.plan_status }}
       package_version: ${{ steps.prepare.outputs.package_version }}
       package_commit: ${{ steps.prepare.outputs.package_commit }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -52,50 +52,42 @@ jobs:
           FORCE_PUBLISH: ${{ inputs.force_publish }}
           PKGBUILD_PATH: ${{ inputs.pkgbuild_path }}
         run: |
-          bun scripts/update.ts \
-            --check \
-            --channel "$CHANNEL" \
-            --pkgbuild "$PKGBUILD_PATH" \
-            > check_result.json
-          cat check_result.json
-
-          publication_status=$(jq -er '.publication.status' check_result.json)
-          should_commit=false
-          should_process=false
-
-          if [[ "$publication_status" == "update-available" && "$FORCE_PUBLISH" != "true" ]]; then
-            should_commit=true
-            should_process=true
-            bun scripts/update.ts \
-              --update \
-              --channel "$CHANNEL" \
-              --pkgbuild "$PKGBUILD_PATH"
-          elif [[ "$FORCE_PUBLISH" == "true" ]]; then
-            should_process=true
+          prepare_args=(
+            scripts/update.ts
+            --prepare
+            --channel "$CHANNEL"
+            --pkgbuild "$PKGBUILD_PATH"
+          )
+          if [[ "$FORCE_PUBLISH" == "true" ]]; then
+            prepare_args+=(--force-publish)
           fi
+          bun "${prepare_args[@]}" > preparation_result.json
+          cat preparation_result.json
 
-          package_version=$(sed -n 's/^pkgver=//p' "$PKGBUILD_PATH")
-          package_commit=$(sed -n 's/^_commit=//p' "$PKGBUILD_PATH")
-          if [[ -z "$package_version" || -z "$package_commit" ]]; then
-            echo "Unable to read package version metadata from $PKGBUILD_PATH" >&2
-            exit 1
-          fi
+          plan_status=$(jq -er '.plan.status' preparation_result.json)
+          echo "plan_status=$plan_status" >> "$GITHUB_OUTPUT"
 
-          {
-            echo "publication_status=$publication_status"
-            echo "should_process=$should_process"
-            echo "should_commit=$should_commit"
-            echo "package_version=$package_version"
-            echo "package_commit=$package_commit"
-          } >> "$GITHUB_OUTPUT"
-
-          if [[ "$should_process" == "true" ]]; then
-            mkdir -p validated
-            cp "$PKGBUILD_PATH" validated/PKGBUILD
-          fi
+          case "$plan_status" in
+            skip)
+              ;;
+            publish-current | update-and-publish)
+              package_version=$(jq -er '.plan.package.pkgver' preparation_result.json)
+              package_commit=$(jq -er '.plan.package.commit' preparation_result.json)
+              {
+                echo "package_version=$package_version"
+                echo "package_commit=$package_commit"
+              } >> "$GITHUB_OUTPUT"
+              mkdir -p validated
+              cp "$PKGBUILD_PATH" validated/PKGBUILD
+              ;;
+            *)
+              echo "Unknown publication plan: $plan_status" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Upload candidate PKGBUILD
-        if: steps.prepare.outputs.should_process == 'true'
+        if: steps.prepare.outputs.plan_status != 'skip'
         uses: actions/upload-artifact@v4
         with:
           name: candidate-pkgbuild
@@ -103,18 +95,25 @@ jobs:
           if-no-files-found: error
 
       - name: Summary
+        env:
+          FORCE_PUBLISH: ${{ inputs.force_publish }}
+          PACKAGE_COMMIT: ${{ steps.prepare.outputs.package_commit }}
+          PACKAGE_VERSION: ${{ steps.prepare.outputs.package_version }}
+          PLAN_STATUS: ${{ steps.prepare.outputs.plan_status }}
         run: |
           echo "::group::Update check"
-          echo "Publication status: ${{ steps.prepare.outputs.publication_status }}"
-          echo "Force publish: ${{ inputs.force_publish }}"
-          echo "Package version: ${{ steps.prepare.outputs.package_version }}"
-          echo "Package commit: ${{ steps.prepare.outputs.package_commit }}"
+          echo "Publication plan: $PLAN_STATUS"
+          echo "Force publish: $FORCE_PUBLISH"
+          echo "Package version: $PACKAGE_VERSION"
+          echo "Package commit: $PACKAGE_COMMIT"
           echo "::endgroup::"
 
   smoke:
     name: Native smoke (${{ matrix.architecture }})
     needs: prepare
-    if: needs.prepare.outputs.should_process == 'true'
+    if: needs.prepare.outputs.plan_status != 'skip'
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -127,6 +126,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Download candidate PKGBUILD
         uses: actions/download-artifact@v4
@@ -146,7 +147,9 @@ jobs:
     needs:
       - prepare
       - smoke
-    if: needs.prepare.outputs.should_process == 'true' && needs.smoke.result == 'success'
+    if: needs.prepare.outputs.plan_status != 'skip' && needs.smoke.result == 'success'
+    permissions:
+      contents: write
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -172,7 +175,7 @@ jobs:
         run: cp validated/PKGBUILD "$PKGBUILD_PATH"
 
       - name: Commit channel PKGBUILD
-        if: needs.prepare.outputs.should_commit == 'true'
+        if: needs.prepare.outputs.plan_status == 'update-and-publish'
         env:
           CHANNEL: ${{ inputs.channel }}
           PACKAGE_COMMIT: ${{ needs.prepare.outputs.package_commit }}

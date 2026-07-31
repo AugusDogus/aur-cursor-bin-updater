@@ -5,9 +5,11 @@ import type {
   LatestVersion,
   PublicationDecision as PublicationDecisionValue,
 } from "../schemas";
-import { Architecture } from "./architecture";
-import type { LatestRelease } from "./cursor-api";
-import { PublicationDecision } from "./publication";
+import {
+  LatestRelease,
+  type LatestRelease as LatestReleaseValue,
+} from "./cursor-api";
+import { PublicationDecision, PublicationPlan } from "./publication";
 
 const current: CurrentVersion = {
   pkgver: "1.0.0",
@@ -22,13 +24,19 @@ const latest: LatestVersion = {
   downloadUrl: "https://example.invalid",
 };
 
+const noUnavailableArtifacts = {
+  x86_64: null,
+  aarch64: null,
+} as const;
+
 describe("PublicationDecision.fromRelease", () => {
   test("distinguishes an update from an aligned current release", () => {
+    const available = LatestRelease.fromArchitectureResults(
+      { x86_64: latest, aarch64: latest },
+      noUnavailableArtifacts,
+    );
     expect(
-      PublicationDecision.fromRelease(current, {
-        status: "available",
-        latest,
-      }),
+      PublicationDecision.fromRelease(current, available),
     ).toEqual({
       status: "update-available",
       latest: {
@@ -37,55 +45,54 @@ describe("PublicationDecision.fromRelease", () => {
         commit: latest.commit,
       },
     });
+    const currentRelease: LatestVersion = {
+      ...latest,
+      pkgver: current.pkgver,
+      upstreamPkgver: current.upstreamPkgver,
+      commit: current.commit,
+    };
     expect(
-      PublicationDecision.fromRelease(current, {
-        status: "available",
-        latest: {
-          ...latest,
-          pkgver: current.pkgver,
-          upstreamPkgver: current.upstreamPkgver,
-          commit: current.commit,
-        },
-      }),
+      PublicationDecision.fromRelease(
+        current,
+        LatestRelease.fromArchitectureResults(
+          { x86_64: currentRelease, aarch64: currentRelease },
+          noUnavailableArtifacts,
+        ),
+      ),
     ).toEqual({ status: "up-to-date" });
   });
 
   test.each([
     [
-      {
-        status: "unavailable",
-        releases: Architecture.all.map((architecture) => ({
-          architecture,
-          latest: null,
-        })),
-      },
+      LatestRelease.fromArchitectureResults(
+        { x86_64: null, aarch64: null },
+        noUnavailableArtifacts,
+      ),
       "release-unavailable",
     ],
     [
-      {
-        status: "architecture-mismatch",
-        releases: Architecture.all.map((architecture) => ({
-          architecture,
-          latest: architecture.pkgbuild === "x86_64" ? latest : null,
-        })),
-      },
+      LatestRelease.fromArchitectureResults(
+        { x86_64: latest, aarch64: null },
+        noUnavailableArtifacts,
+      ),
       "architecture-mismatch",
     ],
     [
-      {
-        status: "artifact-unavailable",
-        latest,
-        artifacts: [
-          {
-            architecture: Architecture.all[1],
+      LatestRelease.fromArchitectureResults(
+        { x86_64: latest, aarch64: latest },
+        {
+          x86_64: null,
+          aarch64: {
             url: "https://example.invalid/arm64.deb",
             reason: "HTTP 404",
           },
-        ],
-      },
+        },
+      ),
       "artifact-unavailable",
     ],
-  ] satisfies ReadonlyArray<readonly [LatestRelease, PublicationDecisionValue["status"]]>)(
+  ] satisfies ReadonlyArray<
+    readonly [LatestReleaseValue, PublicationDecisionValue["status"]]
+  >)(
     "maps non-publishable releases to one state",
     (release, expected) => {
       const decision = PublicationDecision.fromRelease(current, release);
@@ -95,4 +102,31 @@ describe("PublicationDecision.fromRelease", () => {
       }
     },
   );
+});
+
+describe("PublicationPlan.fromRelease", () => {
+  const release = LatestRelease.fromArchitectureResults(
+    { x86_64: latest, aarch64: latest },
+    noUnavailableArtifacts,
+  );
+
+  test("derives one atomic workflow plan", () => {
+    expect(PublicationPlan.fromRelease(current, release, false)).toEqual({
+      status: "update-and-publish",
+      latest,
+      package: {
+        pkgver: latest.pkgver,
+        upstream_pkgver: latest.upstreamPkgver,
+        commit: latest.commit,
+      },
+    });
+    expect(PublicationPlan.fromRelease(current, release, true)).toEqual({
+      status: "publish-current",
+      package: {
+        pkgver: current.pkgver,
+        upstream_pkgver: current.upstreamPkgver,
+        commit: current.commit,
+      },
+    });
+  });
 });

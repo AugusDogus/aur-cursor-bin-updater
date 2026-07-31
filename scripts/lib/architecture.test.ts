@@ -34,4 +34,13 @@ describe("Architecture", () => {
 
     expect(invalidArchitecture.pkgbuild).toBe("x86_64");
   });
+
+  test("maps values by architecture key", async () => {
+    expect(
+      await Architecture.mapValues(async (architecture) => architecture.deb),
+    ).toEqual({
+      x86_64: "amd64",
+      aarch64: "arm64",
+    });
+  });
 });

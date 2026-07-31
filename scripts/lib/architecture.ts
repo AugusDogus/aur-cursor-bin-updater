@@ -1,31 +1,35 @@
-const architectures = [
-  {
+const architectureByPkgbuild = {
+  x86_64: {
     pkgbuild: "x86_64",
     deb: "amd64",
     cursorPlatform: "x64",
     updatePlatform: "linux-x64",
   },
-  {
+  aarch64: {
     pkgbuild: "aarch64",
     deb: "arm64",
     cursorPlatform: "arm64",
     updatePlatform: "linux-arm64",
   },
-] as const;
+} as const;
 
-export type Architecture = (typeof architectures)[number];
+export type Architecture =
+  (typeof architectureByPkgbuild)[keyof typeof architectureByPkgbuild];
 export type ArchitectureValues<Value> = {
-  readonly [Key in Architecture["pkgbuild"]]: Value;
+  readonly [Key in keyof typeof architectureByPkgbuild]: Value;
 };
 
 export const Architecture = {
-  all: architectures,
+  all: [
+    architectureByPkgbuild.x86_64,
+    architectureByPkgbuild.aarch64,
+  ],
   async mapValues<Value>(
     mapper: (architecture: Architecture) => Promise<Value>,
   ): Promise<ArchitectureValues<Value>> {
     const [x86_64, aarch64] = await Promise.all([
-      mapper(architectures[0]),
-      mapper(architectures[1]),
+      mapper(architectureByPkgbuild.x86_64),
+      mapper(architectureByPkgbuild.aarch64),
     ]);
     return { x86_64, aarch64 };
   },
