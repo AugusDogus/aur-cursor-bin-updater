@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { file, write } from "bun";
 
 import {
+  aurPublishManifestName,
   getAurPackageFiles,
   serializeAurPublishManifest,
   stageAurFiles,
@@ -112,5 +114,68 @@ describe("AUR manifest", () => {
     await expect(
       stageAurFiles(files, await temporaryDirectory()),
     ).rejects.toThrow("Staged AUR checksum validation failed");
+  });
+
+  test("preserves the previous payload when validation fails", async () => {
+    const parentDirectory = await temporaryDirectory();
+    const stagingDirectory = join(parentDirectory, ".aur");
+    const markerPath = join(stagingDirectory, "previous-payload");
+    await mkdir(stagingDirectory);
+    await write(markerPath, "preserved");
+
+    await expect(
+      stageAurFiles(
+        [
+          {
+            filename: "PKGBUILD",
+            mode: "644",
+            content:
+              "source=('source.txt')\nsha512sums=('invalid-checksum')\n",
+            validation: "pkgbuild",
+          },
+          {
+            filename: "source.txt",
+            mode: "644",
+            content: "actual content",
+            validation: "local-source",
+          },
+        ],
+        stagingDirectory,
+      ),
+    ).rejects.toThrow("Staged AUR checksum validation failed");
+
+    expect(await file(markerPath).text()).toBe("preserved");
+    expect(
+      await file(
+        join(stagingDirectory, aurPublishManifestName),
+      ).exists(),
+    ).toBe(false);
+  });
+
+  test("replaces a validated payload without retaining stale files", async () => {
+    const parentDirectory = await temporaryDirectory();
+    const stagingDirectory = join(parentDirectory, ".aur");
+    const stalePath = join(stagingDirectory, "stale-file");
+    await mkdir(stagingDirectory);
+    await write(stalePath, "stale");
+
+    await stageAurFiles(
+      [
+        {
+          filename: "PKGBUILD",
+          mode: "644",
+          content: "source=()\nsha512sums=()\n",
+          validation: "pkgbuild",
+        },
+      ],
+      stagingDirectory,
+    );
+
+    expect(await file(stalePath).exists()).toBe(false);
+    expect(
+      await file(
+        join(stagingDirectory, aurPublishManifestName),
+      ).text(),
+    ).toBe("644\tPKGBUILD\n");
   });
 });

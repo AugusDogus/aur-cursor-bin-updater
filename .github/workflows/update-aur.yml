@@ -92,8 +92,6 @@ jobs:
                 echo "package_version=$package_version"
                 echo "package_commit=$package_commit"
               } >> "$GITHUB_OUTPUT"
-              mkdir -p validated
-              cp "$pkgbuild_path" validated/PKGBUILD
               ;;
             *)
               echo "Unknown publication plan: $plan_status" >&2
@@ -101,13 +99,20 @@ jobs:
               ;;
           esac
 
-      - name: Upload candidate PKGBUILD
+      - name: Stage candidate AUR payload
+        if: steps.prepare.outputs.plan_status != 'skip'
+        uses: ./.github/actions/prepare-aur
+        with:
+          channel: ${{ inputs.channel }}
+
+      - name: Upload candidate AUR payload
         if: steps.prepare.outputs.plan_status != 'skip'
         uses: actions/upload-artifact@v4
         with:
-          name: candidate-pkgbuild
-          path: validated/PKGBUILD
+          name: candidate-aur
+          path: .aur
           if-no-files-found: error
+          include-hidden-files: true
 
       - name: Summary
         env:
@@ -130,9 +135,9 @@ jobs:
       contents: read
     uses: ./.github/workflows/native-package-smoke.yml
     with:
-      pkgbuild_paths: validated/PKGBUILD
-      artifact_name: candidate-pkgbuild
-      artifact_path: validated
+      pkgbuild_paths: .aur/PKGBUILD
+      artifact_name: candidate-aur
+      artifact_path: .aur
 
   integrate:
     needs:
@@ -148,16 +153,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download validated PKGBUILD
+      - name: Download validated AUR payload
         uses: actions/download-artifact@v4
         with:
-          name: candidate-pkgbuild
-          path: validated
+          name: candidate-aur
+          path: .aur
 
       - name: Restore validated PKGBUILD
         env:
           PKGBUILD_PATH: ${{ needs.prepare.outputs.pkgbuild_path }}
-        run: cp validated/PKGBUILD "$PKGBUILD_PATH"
+        run: cp .aur/PKGBUILD "$PKGBUILD_PATH"
 
       - name: Commit channel PKGBUILD
         id: commit
@@ -196,18 +201,11 @@ jobs:
           ref: ${{ needs.integrate.outputs.publication_sha }}
           persist-credentials: false
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Download validated AUR payload
+        uses: actions/download-artifact@v4
         with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Prepare PKGBUILD for AUR
-        uses: ./.github/actions/prepare-aur
-        with:
-          channel: ${{ inputs.channel }}
+          name: candidate-aur
+          path: .aur
 
       - name: Install SSH key
         uses: shimataro/ssh-key-action@v2

@@ -30,9 +30,45 @@ jobs:
       - name: Unit tests
         run: bun test
 
+  stage-native-package-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Stage AUR payloads
+        run: |
+          bun scripts/stage-aur.ts --channel early-access
+          mv .aur early-access
+          bun scripts/stage-aur.ts --channel nightly
+          mv .aur nightly
+
+      - name: Upload AUR payloads
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-aur-payloads
+          path: |
+            early-access
+            nightly
+          if-no-files-found: error
+          include-hidden-files: true
+
   native-package-smoke:
+    needs: stage-native-package-smoke
     uses: ./.github/workflows/native-package-smoke.yml
     with:
       pkgbuild_paths: |
-        packaging/early-access/PKGBUILD
-        packaging/nightly/PKGBUILD
+        validated/early-access/PKGBUILD
+        validated/nightly/PKGBUILD
+      artifact_name: test-aur-payloads
+      artifact_path: validated
