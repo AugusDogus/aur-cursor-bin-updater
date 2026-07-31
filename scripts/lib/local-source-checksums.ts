@@ -70,8 +70,31 @@ export async function getLocalSourceChecksumFailures(
     Promise.all(sourcePaths.map(readSourceResult)),
   ]);
   const localSourceIndex = buildLocalSourceIndex(sources);
+  const manifestSourceFilenames = sourcePaths.map((sourcePath) =>
+    basename(sourcePath),
+  );
+  const manifestSourceSet = new Set(manifestSourceFilenames);
+  const duplicateManifestSources = manifestSourceFilenames.filter(
+    (filename, index) =>
+      manifestSourceFilenames.indexOf(filename) !== index,
+  );
+  const missingManifestSources = [...localSourceIndex.keys()].filter(
+    (filename) => !manifestSourceSet.has(filename),
+  );
+  const coverageFailures = [
+    ...new Set(duplicateManifestSources),
+  ].map(
+    (filename) =>
+      `Duplicate manifest local source filename: ${filename}`,
+  );
+  coverageFailures.push(
+    ...missingManifestSources.map(
+      (filename) =>
+        `PKGBUILD local source is missing from the manifest: ${filename}`,
+    ),
+  );
 
-  return (
+  const checksumFailures = (
     await Promise.all(
       sourceResults.map(async (sourceResult) => {
         if (!sourceResult.exists) {
@@ -105,4 +128,5 @@ export async function getLocalSourceChecksumFailures(
       }),
     )
   ).flat();
+  return [...coverageFailures, ...checksumFailures];
 }

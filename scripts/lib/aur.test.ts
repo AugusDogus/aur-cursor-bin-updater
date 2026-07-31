@@ -4,37 +4,37 @@ import { getAurPackageFiles } from "./aur-manifest";
 import {
   isAurPackageCurrent,
   type AurPackageReader,
+  type RemoteAurFile,
 } from "./aur";
 import { getChannelTarget } from "./channels";
 
 const target = getChannelTarget("nightly");
 
-async function localAurFiles() {
-  return Object.fromEntries(
-    (await getAurPackageFiles(target)).map(({ filename, content }) => [
+async function localAurFiles(): Promise<
+  readonly RemoteAurFile[]
+> {
+  return (await getAurPackageFiles(target)).map(
+    ({ filename, content, mode }) => ({
       filename,
       content,
-    ]),
+      mode,
+    }),
   );
 }
 
 describe("isAurPackageCurrent", () => {
   test("compares every published file", async () => {
-    const files: Readonly<Record<string, string>> = await localAurFiles();
-    const matchingReader: AurPackageReader = async () =>
-      Object.entries(files).map(([filename, content]) => ({
-        filename,
-        content,
-      }));
+    const files = await localAurFiles();
+    const matchingReader: AurPackageReader = async () => files;
     expect(await isAurPackageCurrent(target, matchingReader)).toBe(true);
 
     const driftedReader: AurPackageReader = async () =>
-      Object.entries(files).map(([filename, content]) => ({
-        filename,
+      files.map((file) => ({
+        ...file,
         content:
-          filename === "cursor-launcher.sh"
-            ? `${content}\nchanged\n`
-            : content,
+          file.filename === "cursor-launcher.sh"
+            ? `${file.content}\nchanged\n`
+            : file.content,
       }));
     expect(await isAurPackageCurrent(target, driftedReader)).toBe(false);
   });
@@ -43,12 +43,28 @@ describe("isAurPackageCurrent", () => {
     const files = await localAurFiles();
     expect(
       await isAurPackageCurrent(target, async () => [
-        ...Object.entries(files).map(([filename, content]) => ({
-          filename,
-          content,
-        })),
-        { filename: "obsolete.patch", content: "old" },
+        ...files,
+        {
+          filename: "obsolete.patch",
+          content: "old",
+          mode: "644",
+        },
       ]),
+    ).toBe(false);
+  });
+
+  test("detects remote mode drift", async () => {
+    const files = await localAurFiles();
+    expect(
+      await isAurPackageCurrent(
+        target,
+        async () =>
+          files.map((file) =>
+            file.filename === "cursor-launcher.sh"
+              ? { ...file, mode: "644" }
+              : file,
+          ),
+      ),
     ).toBe(false);
   });
 

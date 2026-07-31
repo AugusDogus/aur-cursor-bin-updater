@@ -15,6 +15,7 @@ import type { ChannelTarget } from "./channels";
 export type RemoteAurFile = {
   filename: string;
   content: string | null;
+  mode: "644" | "755" | null;
 };
 
 export type AurPackageReader = (
@@ -22,6 +23,27 @@ export type AurPackageReader = (
 ) => Promise<readonly RemoteAurFile[]>;
 
 const execFileAsync = promisify(execFile);
+
+function normalizeGitMode(
+  gitMode: string | undefined,
+): RemoteAurFile["mode"] {
+  if (gitMode === "100644") return "644";
+  if (gitMode === "100755") return "755";
+  return null;
+}
+
+function parseGitIndexEntry(entry: string) {
+  const separatorIndex = entry.indexOf("\t");
+  const metadata =
+    separatorIndex < 0 ? "" : entry.slice(0, separatorIndex);
+  const filename =
+    separatorIndex < 0 ? "" : entry.slice(separatorIndex + 1);
+  const [gitMode] = metadata.split(" ");
+  return {
+    filename,
+    mode: normalizeGitMode(gitMode),
+  };
+}
 
 async function readAurPackageFromGit(packageName: string) {
   const temporaryDirectory = await mkdtemp(
@@ -45,16 +67,20 @@ async function readAurPackageFromGit(packageName: string) {
     );
     const { stdout } = await execFileAsync(
       "git",
-      ["-C", repositoryDirectory, "ls-files", "-z"],
+      ["-C", repositoryDirectory, "ls-files", "--stage", "-z"],
       { timeout: 30_000 },
     );
-    const filenames = stdout.split("\0").filter(Boolean);
+    const indexEntries = stdout
+      .split("\0")
+      .filter(Boolean)
+      .map(parseGitIndexEntry);
     return await Promise.all(
-      filenames.map(async (filename) => {
+      indexEntries.map(async ({ filename, mode }) => {
         const path = join(repositoryDirectory, filename);
         const metadata = await lstat(path);
         return {
           filename,
+          mode,
           content: metadata.isFile()
             ? await readFile(path, "utf8")
             : null,
@@ -92,17 +118,18 @@ export async function isAurPackageCurrent(
   const remoteByFilename = new Map(
     remoteFiles.map((remoteFile) => [
       remoteFile.filename,
-      remoteFile.content,
+      remoteFile,
     ]),
   );
   if (remoteByFilename.size !== remoteFiles.length) return false;
 
-  return localFiles.every(({ filename, content }) => {
-    const remoteContent = remoteByFilename.get(filename);
+  return localFiles.every(({ filename, mode, content }) => {
+    const remoteFile = remoteByFilename.get(filename);
     return (
-      remoteContent !== undefined &&
-      remoteContent !== null &&
-      normalize(remoteContent) === normalize(content)
+      remoteFile !== undefined &&
+      remoteFile.mode === mode &&
+      remoteFile.content !== null &&
+      normalize(remoteFile.content) === normalize(content)
     );
   });
 }
