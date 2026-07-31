@@ -165,4 +165,38 @@ describe("preparePublication", () => {
     expect(result.plan.status).toBe("update-and-publish");
     expect(appliedVersion).toBe(newer.pkgver);
   });
+
+  test("does not let an AUR comparison error mask a newer release", async () => {
+    const newer = {
+      pkgver: "99.0.0",
+      upstreamPkgver: "99.0.0",
+      commit: "9999999999999999999999999999999999999999",
+    };
+    const alignment = Release.align(
+      Architecture.values(() => newer),
+    );
+    if (alignment.status !== "aligned") {
+      throw new Error("Expected aligned test release");
+    }
+    const release = Release.afterArtifactChecks(
+      alignment,
+      Architecture.values(() => ({ status: "available" })),
+    );
+
+    const result = await preparePublication(
+      { ...command, skipChecksum: true },
+      {
+        getLatestRelease: async () => release,
+        computeDebSha512: async () => {
+          throw new Error("Checksums should be skipped");
+        },
+        isAurPackageCurrent: async () => {
+          throw new Error("AUR is temporarily unavailable");
+        },
+        updatePkgbuild: async () => {},
+      },
+    );
+
+    expect(result.plan.status).toBe("update-and-publish");
+  });
 });

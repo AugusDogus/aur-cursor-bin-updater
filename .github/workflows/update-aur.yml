@@ -121,7 +121,7 @@ jobs:
       artifact_name: candidate-pkgbuild
       artifact_path: validated
 
-  finalize:
+  integrate:
     needs:
       - prepare
       - smoke
@@ -129,17 +129,11 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-24.04
+    outputs:
+      publication_sha: ${{ steps.commit.outputs.publication_sha || github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
 
       - name: Download validated PKGBUILD
         uses: actions/download-artifact@v4
@@ -153,7 +147,7 @@ jobs:
         run: cp validated/PKGBUILD "$PKGBUILD_PATH"
 
       - name: Commit channel PKGBUILD
-        id: integrate
+        id: commit
         if: needs.prepare.outputs.plan_status == 'update-and-publish'
         env:
           CHANNEL: ${{ inputs.channel }}
@@ -170,14 +164,35 @@ jobs:
           git push origin "HEAD:$TARGET_REF"
           echo "publication_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+  publish-aur:
+    needs:
+      - prepare
+      - integrate
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout publication commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.integrate.outputs.publication_sha }}
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
       - name: Prepare PKGBUILD for AUR
-        if: github.ref == 'refs/heads/main'
         uses: ./.github/actions/prepare-aur
         with:
           channel: ${{ inputs.channel }}
 
       - name: Install SSH key
-        if: github.ref == 'refs/heads/main'
         uses: shimataro/ssh-key-action@v2
         with:
           key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
@@ -185,20 +200,12 @@ jobs:
           if_key_exists: replace
 
       - name: Verify main has not advanced
-        if: github.ref == 'refs/heads/main'
         env:
-          EXPECTED_SHA: ${{ steps.integrate.outputs.publication_sha || github.sha }}
+          EXPECTED_SHA: ${{ needs.integrate.outputs.publication_sha }}
           TARGET_REF: ${{ github.ref }}
-        run: |
-          git fetch --no-tags origin "$TARGET_REF"
-          remote_sha=$(git rev-parse FETCH_HEAD)
-          if [[ "$remote_sha" != "$EXPECTED_SHA" ]]; then
-            echo "Main advanced from $EXPECTED_SHA to $remote_sha; refusing to publish a stale PKGBUILD." >&2
-            exit 1
-          fi
+        run: ./scripts/verify-remote-ref.sh "$EXPECTED_SHA" "$TARGET_REF" "refusing to publish a stale PKGBUILD."
 
       - name: Publish AUR package
-        if: github.ref == 'refs/heads/main'
         env:
           AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
           AUR_PACKAGE: ${{ needs.prepare.outputs.aur_package }}
@@ -212,14 +219,7 @@ jobs:
             "Update $CHANNEL to version $PACKAGE_VERSION (commit $PACKAGE_COMMIT)"
 
       - name: Verify main remained unchanged
-        if: github.ref == 'refs/heads/main'
         env:
-          EXPECTED_SHA: ${{ steps.integrate.outputs.publication_sha || github.sha }}
+          EXPECTED_SHA: ${{ needs.integrate.outputs.publication_sha }}
           TARGET_REF: ${{ github.ref }}
-        run: |
-          git fetch --no-tags origin "$TARGET_REF"
-          remote_sha=$(git rev-parse FETCH_HEAD)
-          if [[ "$remote_sha" != "$EXPECTED_SHA" ]]; then
-            echo "Main advanced from $EXPECTED_SHA to $remote_sha during publication; AUR reconciliation will retry." >&2
-            exit 1
-          fi
+        run: ./scripts/verify-remote-ref.sh "$EXPECTED_SHA" "$TARGET_REF" "main changed during publication; AUR reconciliation will retry."

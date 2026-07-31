@@ -1,11 +1,8 @@
-import type { CurrentVersion, LatestVersion } from "../schemas";
+import type { LatestVersion } from "../schemas";
 import { checkResultSchema, preparationResultSchema } from "../schemas";
 import { Architecture } from "./architecture";
 import { isAurPackageCurrent } from "./aur";
-import {
-  getChannelConfig,
-  type ChannelTarget,
-} from "./channels";
+import { getChannelConfig } from "./channels";
 import type { CliCommand } from "./cli";
 import { computeDebSha512 } from "./cursor-artifact";
 import { getLatestRelease } from "./cursor-api";
@@ -14,7 +11,10 @@ import {
   parseCurrentVersion,
   updatePkgbuild,
 } from "./pkgbuild";
-import { PublicationPlan } from "./publication";
+import {
+  PublicationPlan,
+  type PreparationObservation,
+} from "./publication";
 import { Release } from "./release";
 import { summarizeVersion } from "./version";
 
@@ -52,16 +52,29 @@ type PrepareCommand = Extract<CliCommand, { mode: "prepare" }>;
 type UpdateCommand = Extract<CliCommand, { mode: "update" }>;
 type SrcinfoCommand = Extract<CliCommand, { mode: "srcinfo" }>;
 
-function publishCurrentResult(
-  target: ChannelTarget,
-  current: CurrentVersion,
-) {
-  return preparationResultSchema.parse({
-    target,
-    plan: PublicationPlan.toDto(
-      PublicationPlan.publishCurrent(current),
-    ),
-  });
+type Observation<Value> =
+  | { status: "observed"; value: Value }
+  | { status: "failed"; error: unknown };
+
+async function observe<Value>(
+  operation: () => Promise<Value>,
+): Promise<Observation<Value>> {
+  try {
+    return { status: "observed", value: await operation() };
+  } catch (error: unknown) {
+    return { status: "failed", error };
+  }
+}
+
+function throwObservationErrors(
+  errors: readonly [unknown, ...unknown[]],
+): never {
+  const [first, ...remaining] = errors;
+  if (remaining.length === 0) throw first;
+  throw new AggregateError(
+    errors,
+    "AUR comparison and Cursor release discovery both failed",
+  );
 }
 
 async function applyLatestVersion(
@@ -104,28 +117,36 @@ export async function preparePublication(
 ) {
   const target = command.target;
   const current = await parseCurrentVersion(target.pkgbuild_path);
-  if (command.forcePublish) {
-    return publishCurrentResult(target, current);
+  let observation: PreparationObservation;
+  if (command.forcePublish) observation = { status: "forced" };
+  else {
+    const [aur, release] = await Promise.all([
+      observe(() => dependencies.isAurPackageCurrent(target)),
+      observe(() =>
+        dependencies.getLatestRelease(
+          getChannelConfig(target.channel),
+        ),
+      ),
+    ]);
+    observation = {
+      status: "observed",
+      aur:
+        aur.status === "failed"
+          ? aur
+          : aur.value
+            ? { status: "current" }
+            : { status: "drifted" },
+      release,
+    };
   }
 
-  const aurCurrent = await dependencies.isAurPackageCurrent(target);
-  let release: Awaited<ReturnType<typeof getLatestRelease>>;
-  try {
-    release = await dependencies.getLatestRelease(
-      getChannelConfig(target.channel),
-    );
-  } catch (error: unknown) {
-    if (aurCurrent) throw error;
-    return publishCurrentResult(target, current);
+  const outcome = PublicationPlan.prepare(current, observation);
+  if (outcome.status === "failed") {
+    throwObservationErrors(outcome.errors);
   }
-  const plan = PublicationPlan.fromRelease(
-    current,
-    release,
-  );
+  const plan = outcome.plan;
   if (plan.status === "update-and-publish") {
     await applyLatestVersion(command, plan.latest, dependencies);
-  } else if (!aurCurrent) {
-    return publishCurrentResult(target, current);
   }
   return preparationResultSchema.parse({
     target,

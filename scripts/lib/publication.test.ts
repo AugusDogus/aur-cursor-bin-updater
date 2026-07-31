@@ -146,6 +146,52 @@ describe("PublicationPlan", () => {
     });
   });
 
+  test("plans force, drift, and observation failures in one policy", () => {
+    expect(
+      PublicationPlan.prepare(current, { status: "forced" }),
+    ).toEqual({
+      status: "planned",
+      plan: PublicationPlan.publishCurrent(current),
+    });
+
+    const release = getRelease({
+      x86_64: {
+        ...latest,
+        pkgver: current.pkgver,
+        upstreamPkgver: current.upstreamPkgver,
+        commit: current.commit,
+      },
+      aarch64: {
+        ...latest,
+        pkgver: current.pkgver,
+        upstreamPkgver: current.upstreamPkgver,
+        commit: current.commit,
+      },
+    });
+    expect(
+      PublicationPlan.prepare(current, {
+        status: "observed",
+        aur: { status: "drifted" },
+        release: { status: "observed", value: release },
+      }),
+    ).toEqual({
+      status: "planned",
+      plan: PublicationPlan.publishCurrent(current),
+    });
+
+    const releaseError = new Error("release unavailable");
+    expect(
+      PublicationPlan.prepare(current, {
+        status: "observed",
+        aur: { status: "current" },
+        release: { status: "failed", error: releaseError },
+      }),
+    ).toEqual({
+      status: "failed",
+      errors: [releaseError],
+    });
+  });
+
   test("rejects a channel paired with another package target", () => {
     expect(() =>
       preparationResultSchema.parse({

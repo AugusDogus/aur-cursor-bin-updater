@@ -31,6 +31,26 @@ export type ReleasePublicationPlan = Exclude<
   { status: "publish-current" }
 >;
 
+export type PreparationObservation =
+  | { status: "forced" }
+  | {
+      status: "observed";
+      aur:
+        | { status: "current" }
+        | { status: "drifted" }
+        | { status: "failed"; error: unknown };
+      release:
+        | { status: "observed"; value: ReleaseValue }
+        | { status: "failed"; error: unknown };
+    };
+
+export type PreparationOutcome =
+  | { status: "planned"; plan: PublicationPlan }
+  | {
+      status: "failed";
+      errors: readonly [unknown, ...unknown[]];
+    };
+
 function unreachable(value: never): never {
   throw new Error(`Unhandled publication plan: ${JSON.stringify(value)}`);
 }
@@ -75,6 +95,62 @@ export const PublicationPlan = {
             status: "artifact-unavailable",
             message: Release.message(release),
           },
+        };
+    }
+  },
+  prepare(
+    current: CurrentVersion,
+    observation: PreparationObservation,
+  ): PreparationOutcome {
+    if (observation.status === "forced") {
+      return {
+        status: "planned",
+        plan: PublicationPlan.publishCurrent(current),
+      };
+    }
+
+    if (observation.release.status === "observed") {
+      const releasePlan = PublicationPlan.fromRelease(
+        current,
+        observation.release.value,
+      );
+      if (releasePlan.status === "update-and-publish") {
+        return { status: "planned", plan: releasePlan };
+      }
+      switch (observation.aur.status) {
+        case "current":
+          return { status: "planned", plan: releasePlan };
+        case "drifted":
+          return {
+            status: "planned",
+            plan: PublicationPlan.publishCurrent(current),
+          };
+        case "failed":
+          return {
+            status: "failed",
+            errors: [observation.aur.error],
+          };
+      }
+    }
+
+    switch (observation.aur.status) {
+      case "drifted":
+        return {
+          status: "planned",
+          plan: PublicationPlan.publishCurrent(current),
+        };
+      case "current":
+        return {
+          status: "failed",
+          errors: [observation.release.error],
+        };
+      case "failed":
+        return {
+          status: "failed",
+          errors: [
+            observation.release.error,
+            observation.aur.error,
+          ],
         };
     }
   },
