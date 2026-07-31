@@ -14,82 +14,11 @@ permissions:
   contents: write
 
 jobs:
-  check-and-update:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Check for updates
-        id: check
-        run: |
-          bun scripts/update.ts --check --channel early-access --pkgbuild packaging/early-access/PKGBUILD > check_result.json
-          cat check_result.json
-
-          echo "publication_status=$(jq -r '.publication_status' check_result.json)" >> "$GITHUB_OUTPUT"
-          echo "latest_version=$(jq -r '.latest_pkgver' check_result.json)" >> "$GITHUB_OUTPUT"
-          echo "latest_commit=$(jq -r '.latest_commit' check_result.json)" >> "$GITHUB_OUTPUT"
-
-      - name: Update packaging/early-access/PKGBUILD
-        if: steps.check.outputs.publication_status == 'update-available' && !inputs.force_publish
-        run: bun scripts/update.ts --update --channel early-access --pkgbuild packaging/early-access/PKGBUILD
-
-      - name: Commit channel PKGBUILD
-        if: steps.check.outputs.publication_status == 'update-available' && !inputs.force_publish
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add packaging/early-access/PKGBUILD
-          git commit -m "Update early-access PKGBUILD to version ${{ steps.check.outputs.latest_version }} (commit ${{ steps.check.outputs.latest_commit }})" || echo "No changes to commit"
-          git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Check branch and continue or stop workflow
-        if: steps.check.outputs.publication_status == 'update-available' || inputs.force_publish
-        run: |
-          if [[ "${{ github.ref }}" == "refs/heads/development" ]]; then
-            echo "On development branch, stopping workflow"
-            exit 0
-          else
-            echo "On main branch, continuing workflow"
-          fi
-
-      - name: Prepare PKGBUILD for AUR
-        if: (steps.check.outputs.publication_status == 'update-available' || inputs.force_publish) && github.ref != 'refs/heads/development'
-        uses: ./.github/actions/prepare-aur
-        with:
-          channel: early-access
-          pkgbuild-path: packaging/early-access/PKGBUILD
-
-      - name: Install SSH Key
-        if: (steps.check.outputs.publication_status == 'update-available' || inputs.force_publish) && github.ref != 'refs/heads/development'
-        uses: shimataro/ssh-key-action@v2
-        with:
-          key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          known_hosts: ${{ secrets.KNOWN_HOSTS }}
-          if_key_exists: replace
-
-      - name: Publish AUR package
-        if: (steps.check.outputs.publication_status == 'update-available' || inputs.force_publish) && github.ref != 'refs/heads/development'
-        run: ./scripts/publish-aur.sh cursor-early-access-bin "Update early-access to version ${{ steps.check.outputs.latest_version }} (commit ${{ steps.check.outputs.latest_commit }})"
-        env:
-          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
-          AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
-
-      - name: Summary
-        run: |
-          echo "::group::Workflow Summary"
-          echo "Publication status: ${{ steps.check.outputs.publication_status }}"
-          echo "Force publish: ${{ inputs.force_publish }}"
-          echo "Latest version: ${{ steps.check.outputs.latest_version }}"
-          echo "Latest commit: ${{ steps.check.outputs.latest_commit }}"
-          echo "::endgroup::"
+  update:
+    uses: ./.github/workflows/update-aur.yml
+    with:
+      channel: early-access
+      pkgbuild_path: packaging/early-access/PKGBUILD
+      aur_package: cursor-early-access-bin
+      force_publish: ${{ inputs.force_publish }}
+    secrets: inherit

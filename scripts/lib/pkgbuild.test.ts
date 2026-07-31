@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { LatestVersion } from "../schemas";
-import type { Architecture as ArchitectureDescriptor } from "./architecture";
+import type { ArchitectureValues } from "./architecture";
 import { generateSrcinfo, updatePkgbuild } from "./pkgbuild";
 
 const temporaryDirectories: string[] = [];
@@ -54,13 +54,10 @@ _commit=old-commit
 describe("updatePkgbuild", () => {
   test("updates every supported architecture by PKGBUILD name", async () => {
     const path = await writeTemporaryPkgbuild(multiArchitecturePkgbuild);
-    const checksums: ReadonlyMap<
-      ArchitectureDescriptor["pkgbuild"],
-      string
-    > = new Map([
-      ["x86_64", "new-amd64"],
-      ["aarch64", "new-arm64"],
-    ]);
+    const checksums: ArchitectureValues<string> = {
+      x86_64: "new-amd64",
+      aarch64: "new-arm64",
+    };
 
     await updatePkgbuild(path, latest, checksums);
 
@@ -73,16 +70,28 @@ describe("updatePkgbuild", () => {
     expect(updated).toContain("sha512sums_aarch64[0]=new-arm64");
   });
 
-  test("rejects incomplete architecture checksum data", async () => {
-    const path = await writeTemporaryPkgbuild(multiArchitecturePkgbuild);
-    const checksums: ReadonlyMap<
-      ArchitectureDescriptor["pkgbuild"],
-      string
-    > = new Map([["x86_64", "new-amd64"]]);
+  test("requires checksum data for every architecture at typecheck time", () => {
+    // @ts-expect-error aarch64 cannot be omitted.
+    const checksums: ArchitectureValues<string> = {
+      x86_64: "new-amd64",
+    };
 
-    expect(updatePkgbuild(path, latest, checksums)).rejects.toThrow(
-      "Missing checksum for PKGBUILD architecture aarch64",
-    );
+    expect(checksums.x86_64).toBe("new-amd64");
+  });
+
+  test("is idempotent", async () => {
+    const path = await writeTemporaryPkgbuild(multiArchitecturePkgbuild);
+    const checksums: ArchitectureValues<string> = {
+      x86_64: "new-amd64",
+      aarch64: "new-arm64",
+    };
+
+    await updatePkgbuild(path, latest, checksums);
+    const firstUpdate = await readFile(path, "utf8");
+    await updatePkgbuild(path, latest, checksums);
+    const secondUpdate = await readFile(path, "utf8");
+
+    expect(secondUpdate).toBe(firstUpdate);
   });
 });
 

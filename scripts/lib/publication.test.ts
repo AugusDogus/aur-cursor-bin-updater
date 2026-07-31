@@ -3,11 +3,11 @@ import { describe, expect, test } from "bun:test";
 import type {
   CurrentVersion,
   LatestVersion,
-  PublicationStatus as PublicationStatusValue,
+  PublicationDecision as PublicationDecisionValue,
 } from "../schemas";
 import { Architecture } from "./architecture";
 import type { LatestRelease } from "./cursor-api";
-import { PublicationStatus } from "./publication";
+import { PublicationDecision } from "./publication";
 
 const current: CurrentVersion = {
   pkgver: "1.0.0",
@@ -22,16 +22,23 @@ const latest: LatestVersion = {
   downloadUrl: "https://example.invalid",
 };
 
-describe("PublicationStatus.fromRelease", () => {
+describe("PublicationDecision.fromRelease", () => {
   test("distinguishes an update from an aligned current release", () => {
     expect(
-      PublicationStatus.fromRelease(current, {
+      PublicationDecision.fromRelease(current, {
         status: "available",
         latest,
       }),
-    ).toBe("update-available");
+    ).toEqual({
+      status: "update-available",
+      latest: {
+        pkgver: latest.pkgver,
+        upstream_pkgver: latest.upstreamPkgver,
+        commit: latest.commit,
+      },
+    });
     expect(
-      PublicationStatus.fromRelease(current, {
+      PublicationDecision.fromRelease(current, {
         status: "available",
         latest: {
           ...latest,
@@ -40,7 +47,7 @@ describe("PublicationStatus.fromRelease", () => {
           commit: current.commit,
         },
       }),
-    ).toBe("up-to-date");
+    ).toEqual({ status: "up-to-date" });
   });
 
   test.each([
@@ -78,12 +85,14 @@ describe("PublicationStatus.fromRelease", () => {
       },
       "artifact-unavailable",
     ],
-  ] satisfies ReadonlyArray<
-    readonly [LatestRelease, PublicationStatusValue]
-  >)(
+  ] satisfies ReadonlyArray<readonly [LatestRelease, PublicationDecisionValue["status"]]>)(
     "maps non-publishable releases to one state",
     (release, expected) => {
-      expect(PublicationStatus.fromRelease(current, release)).toBe(expected);
+      const decision = PublicationDecision.fromRelease(current, release);
+      expect(decision.status).toBe(expected);
+      if ("message" in decision) {
+        expect(decision.message.length).toBeGreaterThan(0);
+      }
     },
   );
 });

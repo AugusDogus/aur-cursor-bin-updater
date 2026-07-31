@@ -10,7 +10,7 @@ import {
   LatestRelease,
 } from "./lib/cursor-api";
 import { generateSrcinfo, parseCurrentVersion, updatePkgbuild } from "./lib/pkgbuild";
-import { PublicationStatus } from "./lib/publication";
+import { PublicationDecision } from "./lib/publication";
 import { checkResultSchema } from "./schemas";
 
 try {
@@ -25,25 +25,16 @@ try {
 
   const current = await parseCurrentVersion(options.pkgbuildPath);
   const release = await getLatestRelease(channel);
-  const latest =
-    release.status === "available" ||
-    release.status === "artifact-unavailable"
-      ? release.latest
-      : null;
-  const latestUpstreamPkgver = latest?.upstreamPkgver ?? current.upstreamPkgver;
-  const latestPkgver = latest?.pkgver ?? current.pkgver;
-  const latestCommit = latest?.commit ?? current.commit;
-  const publicationStatus = PublicationStatus.fromRelease(current, release);
+  const publication = PublicationDecision.fromRelease(current, release);
 
   const result = checkResultSchema.parse({
     channel: options.channel,
-    current_pkgver: current.pkgver,
-    current_upstream_pkgver: current.upstreamPkgver,
-    current_commit: current.commit,
-    latest_pkgver: latestPkgver,
-    latest_upstream_pkgver: latestUpstreamPkgver,
-    latest_commit: latestCommit,
-    publication_status: publicationStatus,
+    current: {
+      pkgver: current.pkgver,
+      upstream_pkgver: current.upstreamPkgver,
+      commit: current.commit,
+    },
+    publication,
   });
 
   if (options.mode === "check") {
@@ -55,20 +46,16 @@ try {
     console.error(LatestRelease.message(release));
     process.exit(2);
   }
-  if (publicationStatus !== "update-available") {
+  if (publication.status !== "update-available") {
     console.error("Already up to date.");
     process.exit(2);
   }
 
-  const checksums = new Map(
-    await Promise.all(
-      Architecture.all.map(async (architecture) => [
-        architecture.pkgbuild,
-        options.skipChecksum
-          ? "SKIP"
-          : await computeDebSha512(release.latest, architecture),
-      ] as const),
-    ),
+  const checksums = await Architecture.mapValues(
+    async (architecture) =>
+      options.skipChecksum
+        ? "SKIP"
+        : await computeDebSha512(release.latest, architecture),
   );
   await updatePkgbuild(options.pkgbuildPath, release.latest, checksums);
   console.error(

@@ -8,6 +8,7 @@ import {
 import {
   Architecture,
   type Architecture as ArchitectureDescriptor,
+  type ArchitectureValues,
 } from "./architecture";
 
 function getScalarValue(lines: string[], key: string) {
@@ -254,17 +255,10 @@ export async function parseSha512Sums(pkgbuildPath: string) {
 export async function updatePkgbuild(
   pkgbuildPath: string,
   latest: LatestVersion,
-  newSha512: ReadonlyMap<ArchitectureDescriptor["pkgbuild"], string>,
+  newSha512: ArchitectureValues<string>,
 ) {
-  for (const architecture of Architecture.all) {
-    if (!newSha512.has(architecture.pkgbuild)) {
-      throw new Error(
-        `Missing checksum for PKGBUILD architecture ${architecture.pkgbuild}`,
-      );
-    }
-  }
-
-  const lines = (await file(pkgbuildPath).text()).split("\n");
+  const text = await file(pkgbuildPath).text();
+  const lines = text.replace(/\n+$/, "").split("\n");
   const reduced = lines.reduce(
     (state, line) => {
       const trimmed = line.trim();
@@ -295,12 +289,7 @@ export async function updatePkgbuild(
           sawCommit: true,
         };
       if (checksumArchitecture) {
-        const checksum = newSha512.get(checksumArchitecture.pkgbuild);
-        if (checksum === undefined) {
-          throw new Error(
-            `Missing checksum for PKGBUILD architecture ${checksumArchitecture.pkgbuild}`,
-          );
-        }
+        const checksum = newSha512[checksumArchitecture.pkgbuild];
         return {
           ...state,
           lines: [

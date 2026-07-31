@@ -1,0 +1,216 @@
+name: Update AUR package
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: Cursor release channel
+        required: true
+        type: string
+      pkgbuild_path:
+        description: Channel PKGBUILD path
+        required: true
+        type: string
+      aur_package:
+        description: AUR package name
+        required: true
+        type: string
+      force_publish:
+        description: Publish the current PKGBUILD even when no update is available
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      publication_status: ${{ steps.prepare.outputs.publication_status }}
+      should_process: ${{ steps.prepare.outputs.should_process }}
+      should_commit: ${{ steps.prepare.outputs.should_commit }}
+      package_version: ${{ steps.prepare.outputs.package_version }}
+      package_commit: ${{ steps.prepare.outputs.package_commit }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Prepare candidate PKGBUILD
+        id: prepare
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          FORCE_PUBLISH: ${{ inputs.force_publish }}
+          PKGBUILD_PATH: ${{ inputs.pkgbuild_path }}
+        run: |
+          bun scripts/update.ts \
+            --check \
+            --channel "$CHANNEL" \
+            --pkgbuild "$PKGBUILD_PATH" \
+            > check_result.json
+          cat check_result.json
+
+          publication_status=$(jq -er '.publication.status' check_result.json)
+          should_commit=false
+          should_process=false
+
+          if [[ "$publication_status" == "update-available" && "$FORCE_PUBLISH" != "true" ]]; then
+            should_commit=true
+            should_process=true
+            bun scripts/update.ts \
+              --update \
+              --channel "$CHANNEL" \
+              --pkgbuild "$PKGBUILD_PATH"
+          elif [[ "$FORCE_PUBLISH" == "true" ]]; then
+            should_process=true
+          fi
+
+          package_version=$(sed -n 's/^pkgver=//p' "$PKGBUILD_PATH")
+          package_commit=$(sed -n 's/^_commit=//p' "$PKGBUILD_PATH")
+          if [[ -z "$package_version" || -z "$package_commit" ]]; then
+            echo "Unable to read package version metadata from $PKGBUILD_PATH" >&2
+            exit 1
+          fi
+
+          {
+            echo "publication_status=$publication_status"
+            echo "should_process=$should_process"
+            echo "should_commit=$should_commit"
+            echo "package_version=$package_version"
+            echo "package_commit=$package_commit"
+          } >> "$GITHUB_OUTPUT"
+
+          if [[ "$should_process" == "true" ]]; then
+            mkdir -p validated
+            cp "$PKGBUILD_PATH" validated/PKGBUILD
+          fi
+
+      - name: Upload candidate PKGBUILD
+        if: steps.prepare.outputs.should_process == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-pkgbuild
+          path: validated/PKGBUILD
+          if-no-files-found: error
+
+      - name: Summary
+        run: |
+          echo "::group::Update check"
+          echo "Publication status: ${{ steps.prepare.outputs.publication_status }}"
+          echo "Force publish: ${{ inputs.force_publish }}"
+          echo "Package version: ${{ steps.prepare.outputs.package_version }}"
+          echo "Package commit: ${{ steps.prepare.outputs.package_commit }}"
+          echo "::endgroup::"
+
+  smoke:
+    name: Native smoke (${{ matrix.architecture }})
+    needs: prepare
+    if: needs.prepare.outputs.should_process == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86_64
+            runner: ubuntu-24.04
+          - architecture: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download candidate PKGBUILD
+        uses: actions/download-artifact@v4
+        with:
+          name: candidate-pkgbuild
+          path: validated
+
+      - name: Install package smoke dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes binutils curl libarchive-tools xz-utils
+
+      - name: Run native package smoke test
+        run: scripts/smoke-test-pkgbuild.sh validated/PKGBUILD
+
+  finalize:
+    needs:
+      - prepare
+      - smoke
+    if: needs.prepare.outputs.should_process == 'true' && needs.smoke.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Download validated PKGBUILD
+        uses: actions/download-artifact@v4
+        with:
+          name: candidate-pkgbuild
+          path: validated
+
+      - name: Restore validated PKGBUILD
+        env:
+          PKGBUILD_PATH: ${{ inputs.pkgbuild_path }}
+        run: cp validated/PKGBUILD "$PKGBUILD_PATH"
+
+      - name: Commit channel PKGBUILD
+        if: needs.prepare.outputs.should_commit == 'true'
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          PACKAGE_COMMIT: ${{ needs.prepare.outputs.package_commit }}
+          PACKAGE_VERSION: ${{ needs.prepare.outputs.package_version }}
+          PKGBUILD_PATH: ${{ inputs.pkgbuild_path }}
+          TARGET_REF: ${{ github.ref_name }}
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add "$PKGBUILD_PATH"
+          git commit -m "Update $CHANNEL PKGBUILD to version $PACKAGE_VERSION (commit $PACKAGE_COMMIT)"
+          git push origin "HEAD:$TARGET_REF"
+
+      - name: Prepare PKGBUILD for AUR
+        if: github.ref == 'refs/heads/main'
+        uses: ./.github/actions/prepare-aur
+        with:
+          channel: ${{ inputs.channel }}
+          pkgbuild-path: ${{ inputs.pkgbuild_path }}
+
+      - name: Install SSH key
+        if: github.ref == 'refs/heads/main'
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          known_hosts: ${{ secrets.KNOWN_HOSTS }}
+          if_key_exists: replace
+
+      - name: Publish AUR package
+        if: github.ref == 'refs/heads/main'
+        env:
+          AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+          AUR_PACKAGE: ${{ inputs.aur_package }}
+          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+          CHANNEL: ${{ inputs.channel }}
+          PACKAGE_COMMIT: ${{ needs.prepare.outputs.package_commit }}
+          PACKAGE_VERSION: ${{ needs.prepare.outputs.package_version }}
+        run: |
+          ./scripts/publish-aur.sh \
+            "$AUR_PACKAGE" \
+            "Update $CHANNEL to version $PACKAGE_VERSION (commit $PACKAGE_COMMIT)"

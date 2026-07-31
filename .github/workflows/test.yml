@@ -9,16 +9,7 @@ permissions:
 
 jobs:
   test:
-    name: Test (${{ matrix.architecture }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - architecture: x86_64
-            runner: ubuntu-24.04
-          - architecture: aarch64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,6 +27,21 @@ jobs:
 
       - name: Unit tests
         run: bun test
+
+  native-package-smoke:
+    name: Native package smoke (${{ matrix.architecture }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86_64
+            runner: ubuntu-24.04
+          - architecture: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install package smoke dependencies
         run: |

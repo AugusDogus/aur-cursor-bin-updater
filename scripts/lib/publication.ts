@@ -1,26 +1,47 @@
 import type {
   CurrentVersion,
-  PublicationStatus as PublicationStatusValue,
+  LatestVersion,
+  PublicationDecision as PublicationDecisionValue,
 } from "../schemas";
-import type { LatestRelease } from "./cursor-api";
+import { LatestRelease, type LatestRelease as LatestReleaseValue } from "./cursor-api";
 
-export const PublicationStatus = {
+function summarizeVersion(latest: LatestVersion) {
+  return {
+    pkgver: latest.pkgver,
+    upstream_pkgver: latest.upstreamPkgver,
+    commit: latest.commit,
+  };
+}
+
+export const PublicationDecision = {
   fromRelease(
     current: CurrentVersion,
-    release: LatestRelease,
-  ): PublicationStatusValue {
+    release: LatestReleaseValue,
+  ): PublicationDecisionValue {
     switch (release.status) {
       case "available":
         return current.upstreamPkgver !== release.latest.upstreamPkgver ||
           current.commit !== release.latest.commit
-          ? "update-available"
-          : "up-to-date";
+          ? {
+              status: "update-available",
+              latest: summarizeVersion(release.latest),
+            }
+          : { status: "up-to-date" };
       case "unavailable":
-        return "release-unavailable";
+        return {
+          status: "release-unavailable",
+          message: LatestRelease.message(release),
+        };
       case "architecture-mismatch":
-        return "architecture-mismatch";
+        return {
+          status: "architecture-mismatch",
+          message: LatestRelease.message(release),
+        };
       case "artifact-unavailable":
-        return "artifact-unavailable";
+        return {
+          status: "artifact-unavailable",
+          message: LatestRelease.message(release),
+        };
     }
   },
 } as const;
