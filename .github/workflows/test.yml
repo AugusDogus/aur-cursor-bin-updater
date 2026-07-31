@@ -31,25 +31,8 @@ jobs:
         run: bun test
 
   native-package-smoke:
-    name: Native package smoke (${{ matrix.architecture }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - architecture: x86_64
-            runner: ubuntu-24.04
-          - architecture: aarch64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Native package smoke tests
-        uses: ./.github/actions/native-package-smoke
-        with:
-          pkgbuild-paths: |
-            packaging/early-access/PKGBUILD
-            packaging/nightly/PKGBUILD
+    uses: ./.github/workflows/native-package-smoke.yml
+    with:
+      pkgbuild_paths: |
+        packaging/early-access/PKGBUILD
+        packaging/nightly/PKGBUILD

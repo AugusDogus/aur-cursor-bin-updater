@@ -3,15 +3,13 @@ import { CryptoHasher } from "bun";
 import type { LatestVersion } from "../schemas";
 import type { Architecture as ArchitectureDescriptor } from "./architecture";
 import type { ArtifactAvailability } from "./release";
+import {
+  defaultCursorFetch,
+  requestCursor,
+  type CursorFetch,
+} from "./cursor-transport";
 
-const USER_AGENT = "aur-cursor-bin-updater/1.0";
-
-export type CursorFetch = (
-  input: string,
-  init?: RequestInit,
-) => Promise<Response>;
-
-const defaultFetch: CursorFetch = (input, init) => fetch(input, init);
+export type { CursorFetch } from "./cursor-transport";
 
 export function createDebUrl(
   latest: LatestVersion,
@@ -23,15 +21,14 @@ export function createDebUrl(
 export async function checkDebAvailability(
   latest: LatestVersion,
   architecture: ArchitectureDescriptor,
-  fetcher: CursorFetch = defaultFetch,
+  fetcher: CursorFetch = defaultCursorFetch,
 ): Promise<ArtifactAvailability> {
   const url = createDebUrl(latest, architecture);
 
   try {
-    const response = await fetcher(url, {
+    const response = await requestCursor(fetcher, url, {
       method: "HEAD",
-      headers: { "User-Agent": USER_AGENT },
-      signal: AbortSignal.timeout(30_000),
+      timeoutMs: 30_000,
     });
     return response.ok
       ? { status: "available" }
@@ -62,12 +59,13 @@ async function digestStream(
 export async function computeDebSha512(
   latest: LatestVersion,
   architecture: ArchitectureDescriptor,
-  fetcher: CursorFetch = defaultFetch,
+  fetcher: CursorFetch = defaultCursorFetch,
 ) {
-  const response = await fetcher(createDebUrl(latest, architecture), {
-    headers: { "User-Agent": USER_AGENT },
-    signal: AbortSignal.timeout(300_000),
-  });
+  const response = await requestCursor(
+    fetcher,
+    createDebUrl(latest, architecture),
+    { timeoutMs: 300_000 },
+  );
 
   if (!response.ok || !response.body) {
     throw new Error(

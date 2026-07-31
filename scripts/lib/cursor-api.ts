@@ -7,12 +7,13 @@ import { Architecture } from "./architecture";
 import type { ChannelConfig } from "./channels";
 import {
   checkDebAvailability,
-  type CursorFetch,
 } from "./cursor-artifact";
+import {
+  defaultCursorFetch,
+  requestCursor,
+  type CursorFetch,
+} from "./cursor-transport";
 import { Release, type Release as ReleaseValue } from "./release";
-
-const USER_AGENT = "aur-cursor-bin-updater/1.0";
-const defaultFetch: CursorFetch = (input, init) => fetch(input, init);
 
 function extractCommitFromDownloadUrl(downloadUrl: string) {
   const pathname = new URL(downloadUrl).pathname;
@@ -31,9 +32,8 @@ async function getLatestVersion(
   const probePkgver = "0.0.0";
   const updateUrl = `https://api2.cursor.sh/updates/api/update/${architecture.updatePlatform}/cursor/${probePkgver}/${machineHashPlaceholder}/${channel.releaseTrack}`;
 
-  const response = await fetcher(updateUrl, {
-    headers: { "User-Agent": USER_AGENT },
-    signal: AbortSignal.timeout(30_000),
+  const response = await requestCursor(fetcher, updateUrl, {
+    timeoutMs: 30_000,
   });
 
   if (response.status === 204) return null;
@@ -55,7 +55,7 @@ async function getLatestVersion(
 
 export async function getLatestRelease(
   channel: ChannelConfig,
-  fetcher: CursorFetch = defaultFetch,
+  fetcher: CursorFetch = defaultCursorFetch,
 ): Promise<ReleaseValue> {
   const releases = await Architecture.mapValues(
     async (architecture) =>

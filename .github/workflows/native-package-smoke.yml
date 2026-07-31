@@ -1,0 +1,52 @@
+name: Native package smoke
+
+on:
+  workflow_call:
+    inputs:
+      pkgbuild_paths:
+        description: Newline-separated PKGBUILDs to validate
+        required: true
+        type: string
+      artifact_name:
+        description: Optional artifact containing the PKGBUILDs
+        required: false
+        default: ""
+        type: string
+      artifact_path:
+        description: Directory where the optional artifact is extracted
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Native package smoke (${{ matrix.architecture }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86_64
+            runner: ubuntu-24.04
+          - architecture: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download PKGBUILD artifact
+        if: inputs.artifact_name != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ${{ inputs.artifact_path }}
+
+      - name: Run native package smoke test
+        uses: ./.github/actions/native-package-smoke
+        with:
+          pkgbuild-paths: ${{ inputs.pkgbuild_paths }}
