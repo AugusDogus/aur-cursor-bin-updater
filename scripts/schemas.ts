@@ -46,7 +46,6 @@ export const latestVersionSchema = z.object({
 	upstreamPkgver: upstreamVersionSchema,
 	pkgver: pkgverSchema,
 	commit: commitSchema,
-	downloadUrl: cursorDownloadUrlSchema,
 });
 
 const versionSummarySchema = z.object({

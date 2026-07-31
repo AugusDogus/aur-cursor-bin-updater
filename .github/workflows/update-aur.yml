@@ -173,6 +173,24 @@ jobs:
           PKGBUILD_PATH: ${{ needs.prepare.outputs.pkgbuild_path }}
         run: cp validated/PKGBUILD "$PKGBUILD_PATH"
 
+      - name: Commit channel PKGBUILD
+        id: integrate
+        if: needs.prepare.outputs.plan_status == 'update-and-publish'
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          PACKAGE_COMMIT: ${{ needs.prepare.outputs.package_commit }}
+          PACKAGE_VERSION: ${{ needs.prepare.outputs.package_version }}
+          PKGBUILD_PATH: ${{ needs.prepare.outputs.pkgbuild_path }}
+          TARGET_REF: ${{ github.ref_name }}
+        run: |
+          # Up-to-date runs reconcile AUR drift, so a later publish failure retries.
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add "$PKGBUILD_PATH"
+          git commit -m "Update $CHANNEL PKGBUILD to version $PACKAGE_VERSION (commit $PACKAGE_COMMIT)"
+          git push origin "HEAD:$TARGET_REF"
+          echo "publication_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Prepare PKGBUILD for AUR
         if: github.ref == 'refs/heads/main'
         uses: ./.github/actions/prepare-aur
@@ -191,7 +209,7 @@ jobs:
       - name: Verify main has not advanced
         if: github.ref == 'refs/heads/main'
         env:
-          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_SHA: ${{ steps.integrate.outputs.publication_sha || github.sha }}
           TARGET_REF: ${{ github.ref }}
         run: |
           git fetch --no-tags origin "$TARGET_REF"
@@ -215,18 +233,15 @@ jobs:
             "$AUR_PACKAGE" \
             "Update $CHANNEL to version $PACKAGE_VERSION (commit $PACKAGE_COMMIT)"
 
-      - name: Commit channel PKGBUILD
-        if: needs.prepare.outputs.plan_status == 'update-and-publish'
+      - name: Verify main remained unchanged
+        if: github.ref == 'refs/heads/main'
         env:
-          CHANNEL: ${{ inputs.channel }}
-          PACKAGE_COMMIT: ${{ needs.prepare.outputs.package_commit }}
-          PACKAGE_VERSION: ${{ needs.prepare.outputs.package_version }}
-          PKGBUILD_PATH: ${{ needs.prepare.outputs.pkgbuild_path }}
-          TARGET_REF: ${{ github.ref_name }}
+          EXPECTED_SHA: ${{ steps.integrate.outputs.publication_sha || github.sha }}
+          TARGET_REF: ${{ github.ref }}
         run: |
-          # Commit last so a failed AUR publish remains eligible for an automatic retry.
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add "$PKGBUILD_PATH"
-          git commit -m "Update $CHANNEL PKGBUILD to version $PACKAGE_VERSION (commit $PACKAGE_COMMIT)"
-          git push origin "HEAD:$TARGET_REF"
+          git fetch --no-tags origin "$TARGET_REF"
+          remote_sha=$(git rev-parse FETCH_HEAD)
+          if [[ "$remote_sha" != "$EXPECTED_SHA" ]]; then
+            echo "Main advanced from $EXPECTED_SHA to $remote_sha during publication; AUR reconciliation will retry." >&2
+            exit 1
+          fi

@@ -3,6 +3,18 @@ import { describe, expect, test } from "bun:test";
 import { parseCliOptions } from "./cli";
 
 describe("parseCliOptions", () => {
+  test("returns mode-specific command fields", () => {
+    const command = parseCliOptions([
+      "--check",
+      "--channel",
+      "early-access",
+    ]);
+    expect(command.mode).toBe("check");
+    if (command.mode !== "check") return;
+    // @ts-expect-error check commands cannot carry update-only state.
+    expect(command.skipChecksum).toBeUndefined();
+  });
+
   test("selects exactly one mode", () => {
     expect(() =>
       parseCliOptions([
@@ -28,7 +40,6 @@ describe("parseCliOptions", () => {
       mode: "prepare",
       channel: "nightly",
       pkgbuildPath: "packaging/nightly/PKGBUILD",
-      srcinfoPath: "packaging/nightly/.SRCINFO",
       skipChecksum: false,
       forcePublish: true,
     });

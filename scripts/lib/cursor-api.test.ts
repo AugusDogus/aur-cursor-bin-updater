@@ -7,8 +7,8 @@ import type { ChannelConfig } from "./channels";
 import {
   computeDebSha512,
   createDebUrl,
-  getLatestRelease,
-} from "./cursor-api";
+} from "./cursor-artifact";
+import { getLatestRelease } from "./cursor-api";
 
 const channel: ChannelConfig = {
   releaseTrack: "dev",
@@ -37,7 +37,6 @@ describe("createDebUrl", () => {
     upstreamPkgver: "9.9.9",
     pkgver: "9.9.9",
     commit,
-    downloadUrl: "https://example.invalid",
   };
 
   test("uses the centralized architecture descriptor", () => {
@@ -55,7 +54,6 @@ test("computeDebSha512 downloads and hashes the requested architecture", async (
     upstreamPkgver: "9.9.9",
     pkgver: "9.9.9",
     commit,
-    downloadUrl: "https://example.invalid",
   };
   const requestedUrls: string[] = [];
   const checksum = await computeDebSha512(

@@ -1,85 +1,43 @@
 import process from "node:process";
 import { write } from "bun";
 
-import { parseCliOptions, getUsageText } from "./lib/cli";
-import { Architecture } from "./lib/architecture";
-import { getChannelConfig, getChannelTarget } from "./lib/channels";
+import { getUsageText, parseCliOptions } from "./lib/cli";
 import {
-  computeDebSha512,
-  getLatestRelease,
-  LatestRelease,
-} from "./lib/cursor-api";
-import { generateSrcinfo, parseCurrentVersion, updatePkgbuild } from "./lib/pkgbuild";
-import { PublicationPlan } from "./lib/publication";
-import { checkResultSchema, preparationResultSchema } from "./schemas";
+  checkForUpdate,
+  generateChannelSrcinfo,
+  preparePublication,
+  updatePackage,
+} from "./lib/update-operations";
+
+async function main() {
+  const command = parseCliOptions(process.argv.slice(2));
+  switch (command.mode) {
+    case "check":
+      console.log(JSON.stringify(await checkForUpdate(command), null, 2));
+      return 0;
+    case "prepare":
+      console.log(JSON.stringify(await preparePublication(command), null, 2));
+      return 0;
+    case "srcinfo":
+      await write(command.srcinfoPath, await generateChannelSrcinfo(command));
+      console.error(`Generated ${command.srcinfoPath}`);
+      return 0;
+    case "update": {
+      const result = await updatePackage(command);
+      if (result.status === "not-updated") {
+        console.error(result.message);
+        return 2;
+      }
+      console.error(
+        `Updated ${command.pkgbuildPath} -> ${result.latest.upstreamPkgver} (${result.latest.commit.slice(0, 8)})`,
+      );
+      return 0;
+    }
+  }
+}
 
 try {
-  const options = parseCliOptions(process.argv.slice(2));
-  const channel = getChannelConfig(options.channel);
-
-  if (options.mode === "srcinfo") {
-    await write(options.srcinfoPath, await generateSrcinfo(options.pkgbuildPath));
-    console.error(`Generated ${options.srcinfoPath}`);
-    process.exit(0);
-  }
-
-  const current = await parseCurrentVersion(options.pkgbuildPath);
-  if (options.mode === "prepare" && options.forcePublish) {
-    const result = preparationResultSchema.parse({
-      target: getChannelTarget(options.channel),
-      plan: PublicationPlan.toDto(PublicationPlan.publishCurrent(current)),
-    });
-    console.log(JSON.stringify(result, null, 2));
-    process.exit(0);
-  }
-
-  const release = await getLatestRelease(channel);
-  const plan = PublicationPlan.fromRelease(current, release);
-
-  if (options.mode === "check") {
-    const result = checkResultSchema.parse({
-      channel: options.channel,
-      current: {
-        pkgver: current.pkgver,
-        upstream_pkgver: current.upstreamPkgver,
-        commit: current.commit,
-      },
-      publication: PublicationPlan.toDecision(plan),
-    });
-    console.log(JSON.stringify(result, null, 2));
-    process.exit(0);
-  }
-
-  if (plan.status === "update-and-publish") {
-    const checksums = await Architecture.mapValues(
-      async (architecture) =>
-        options.skipChecksum
-          ? "SKIP"
-          : await computeDebSha512(plan.latest, architecture),
-    );
-    await updatePkgbuild(options.pkgbuildPath, plan.latest, checksums);
-  }
-
-  if (options.mode === "prepare") {
-    const result = preparationResultSchema.parse({
-      target: getChannelTarget(options.channel),
-      plan: PublicationPlan.toDto(plan),
-    });
-    console.log(JSON.stringify(result, null, 2));
-    process.exit(0);
-  }
-
-  if (plan.status === "skip") {
-    console.error(
-      release.status === "available"
-        ? "Already up to date."
-        : LatestRelease.message(release),
-    );
-    process.exit(2);
-  }
-  console.error(
-    `Updated ${options.pkgbuildPath} -> ${plan.latest.upstreamPkgver} (${plan.latest.commit.slice(0, 8)})`,
-  );
+  process.exit(await main());
 } catch (error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   if (message === getUsageText()) console.error(getUsageText());

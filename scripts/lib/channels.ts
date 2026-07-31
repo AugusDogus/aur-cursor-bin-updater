@@ -1,10 +1,5 @@
 import { z } from "zod";
 
-const channelKeys = ["nightly", "early-access"] as const;
-
-export const channelKeySchema = z.enum(channelKeys);
-export type ChannelKey = (typeof channelKeys)[number];
-
 export interface ChannelConfig {
   releaseTrack: "dev" | "prerelease";
   defaultPkgbuild: string;
@@ -22,20 +17,36 @@ export const channels = {
     defaultPkgbuild: "packaging/early-access/PKGBUILD",
     aurPackage: "cursor-early-access-bin",
   },
-} as const satisfies Record<ChannelKey, ChannelConfig>;
+} as const satisfies Record<string, ChannelConfig>;
 
-export const channelTargetSchema = z.discriminatedUnion("channel", [
-  z.object({
-    channel: z.literal("nightly"),
-    pkgbuild_path: z.literal(channels.nightly.defaultPkgbuild),
-    aur_package: z.literal(channels.nightly.aurPackage),
-  }),
-  z.object({
-    channel: z.literal("early-access"),
-    pkgbuild_path: z.literal(channels["early-access"].defaultPkgbuild),
-    aur_package: z.literal(channels["early-access"].aurPackage),
-  }),
-]);
+export type ChannelKey = keyof typeof channels;
+export type ChannelTarget = {
+  [Key in ChannelKey]: {
+    channel: Key;
+    pkgbuild_path: (typeof channels)[Key]["defaultPkgbuild"];
+    aur_package: (typeof channels)[Key]["aurPackage"];
+  };
+}[ChannelKey];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+export const channelKeySchema = z.custom<ChannelKey>(
+  (value) => typeof value === "string" && Object.hasOwn(channels, value),
+  "Expected a configured release channel",
+);
+
+export const channelTargetSchema = z.custom<ChannelTarget>((value) => {
+  if (!isRecord(value)) return false;
+  const parsedChannel = channelKeySchema.safeParse(value.channel);
+  if (!parsedChannel.success) return false;
+  const config = channels[parsedChannel.data];
+  return (
+    value.pkgbuild_path === config.defaultPkgbuild &&
+    value.aur_package === config.aurPackage
+  );
+}, "Expected a configured channel target");
 
 export function getChannelConfig<Key extends ChannelKey>(channel: Key) {
   return channels[channel];

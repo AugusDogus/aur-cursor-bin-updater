@@ -4,10 +4,7 @@ import type {
   PreparationPlanDto,
   PublicationDecision,
 } from "../schemas";
-import {
-  LatestRelease,
-  type LatestRelease as LatestReleaseValue,
-} from "./cursor-api";
+import { Release, type Release as ReleaseValue } from "./release";
 
 type NonUpdatePublicationDecision = Exclude<
   PublicationDecision,
@@ -50,7 +47,7 @@ function unreachable(value: never): never {
 export const PublicationPlan = {
   fromRelease(
     current: CurrentVersion,
-    release: LatestReleaseValue,
+    release: ReleaseValue,
   ): ReleasePublicationPlan {
     switch (release.status) {
       case "available":
@@ -69,7 +66,7 @@ export const PublicationPlan = {
           status: "skip",
           publication: {
             status: "release-unavailable",
-            message: LatestRelease.message(release),
+            message: Release.message(release),
           },
         };
       case "architecture-mismatch":
@@ -77,7 +74,7 @@ export const PublicationPlan = {
           status: "skip",
           publication: {
             status: "architecture-mismatch",
-            message: LatestRelease.message(release),
+            message: Release.message(release),
           },
         };
       case "artifact-unavailable":
@@ -85,7 +82,7 @@ export const PublicationPlan = {
           status: "skip",
           publication: {
             status: "artifact-unavailable",
-            message: LatestRelease.message(release),
+            message: Release.message(release),
           },
         };
     }

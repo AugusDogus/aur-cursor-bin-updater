@@ -29,7 +29,6 @@ const latest: LatestVersion = {
   pkgver: "2.0.0",
   upstreamPkgver: "2.0.0",
   commit: "0123456789abcdef0123456789abcdef01234567",
-  downloadUrl: "https://example.invalid",
 };
 
 const multiArchitecturePkgbuild = `pkgname=cursor-test-bin

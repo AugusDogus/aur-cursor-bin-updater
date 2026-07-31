@@ -5,15 +5,13 @@ import {
   type CurrentVersion,
   type LatestVersion,
 } from "../schemas";
-import type { ChannelConfig } from "./channels";
-import { getLatestRelease } from "./cursor-api";
 import { PublicationPlan } from "./publication";
+import {
+  Release,
+  type ArtifactAvailability,
+  type Release as ReleaseValue,
+} from "./release";
 
-const channel: ChannelConfig = {
-  releaseTrack: "dev",
-  defaultPkgbuild: "packaging/nightly/PKGBUILD",
-  aurPackage: "cursor-nightly-bin",
-};
 const currentCommit = "1111111111111111111111111111111111111111";
 const latestCommit = "2222222222222222222222222222222222222222";
 const current: CurrentVersion = {
@@ -25,53 +23,36 @@ const latest: LatestVersion = {
   pkgver: "2.0.0",
   upstreamPkgver: "2.0.0",
   commit: latestCommit,
-  downloadUrl: `https://downloads.cursor.com/production/${latestCommit}/linux/x64/Cursor-2.0.0.AppImage.zsync`,
 };
 
-function updateResponse(
-  platform: "x64" | "arm64",
-  version: string,
-  commit: string,
-) {
-  return new Response(
-    JSON.stringify({
-      version,
-      url: `https://downloads.cursor.com/production/${commit}/linux/${platform}/Cursor-${version}.AppImage.zsync`,
-    }),
-    { status: 200 },
-  );
-}
-
-async function getRelease(options?: {
+function getRelease(options?: {
   x86_64?: LatestVersion | null;
   aarch64?: LatestVersion | null;
   unavailableArtifact?: "x86_64" | "aarch64";
-}) {
+}): ReleaseValue {
   const x86_64 = options?.x86_64 === undefined ? latest : options.x86_64;
   const aarch64 = options?.aarch64 === undefined ? latest : options.aarch64;
-
-  return getLatestRelease(channel, async (input, init) => {
-    const url = input.toString();
-    const architecture = url.includes("arm64") ? "aarch64" : "x86_64";
-    if (init?.method === "HEAD") {
-      return new Response(null, {
-        status: options?.unavailableArtifact === architecture ? 404 : 200,
-      });
-    }
-
-    const release = architecture === "aarch64" ? aarch64 : x86_64;
-    if (release === null) return new Response(null, { status: 204 });
-    return updateResponse(
-      architecture === "aarch64" ? "arm64" : "x64",
-      release.upstreamPkgver,
-      release.commit,
-    );
+  const alignment = Release.align({ x86_64, aarch64 });
+  if (alignment.status !== "aligned") return alignment;
+  const unavailable = (
+    architecture: "x86_64" | "aarch64",
+  ): ArtifactAvailability =>
+    options?.unavailableArtifact === architecture
+      ? {
+          status: "unavailable",
+          url: `https://example.invalid/${architecture}.deb`,
+          reason: "HTTP 404",
+        }
+      : { status: "available" };
+  return Release.afterArtifactChecks(alignment, {
+    x86_64: unavailable("x86_64"),
+    aarch64: unavailable("aarch64"),
   });
 }
 
 describe("PublicationPlan", () => {
-  test("distinguishes an update from an aligned current release", async () => {
-    const available = await getRelease();
+  test("distinguishes an update from an aligned current release", () => {
+    const available = getRelease();
     expect(
       PublicationPlan.toDecision(
         PublicationPlan.fromRelease(current, available),
@@ -95,7 +76,7 @@ describe("PublicationPlan", () => {
       PublicationPlan.toDecision(
         PublicationPlan.fromRelease(
           current,
-          await getRelease({
+          getRelease({
             x86_64: currentRelease,
             aarch64: currentRelease,
           }),
@@ -104,18 +85,18 @@ describe("PublicationPlan", () => {
     ).toEqual({ status: "up-to-date" });
   });
 
-  test("maps non-publishable releases to one state", async () => {
+  test("maps non-publishable releases to one state", () => {
     const releases = [
       [
-        await getRelease({ x86_64: null, aarch64: null }),
+        getRelease({ x86_64: null, aarch64: null }),
         "release-unavailable",
       ],
       [
-        await getRelease({ x86_64: latest, aarch64: null }),
+        getRelease({ x86_64: latest, aarch64: null }),
         "architecture-mismatch",
       ],
       [
-        await getRelease({ unavailableArtifact: "aarch64" }),
+        getRelease({ unavailableArtifact: "aarch64" }),
         "artifact-unavailable",
       ],
     ] as const;
@@ -131,8 +112,8 @@ describe("PublicationPlan", () => {
     }
   });
 
-  test("derives and serializes one atomic workflow plan", async () => {
-    const release = await getRelease();
+  test("derives and serializes one atomic workflow plan", () => {
+    const release = getRelease();
     const updatePlan = PublicationPlan.fromRelease(current, release);
     expect(updatePlan).toEqual({
       status: "update-and-publish",

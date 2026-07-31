@@ -10,14 +10,26 @@ import {
 const usage =
   "Usage: bun scripts/update.ts [--check|--update|--prepare|--srcinfo] --channel <nightly|early-access> [--pkgbuild <path>] [--srcinfo-path <path>] [--skip-checksum] [--force-publish]";
 
-export interface CliOptions {
-  mode: "check" | "update" | "prepare" | "srcinfo";
+interface ChannelCommand {
   channel: ChannelKey;
   pkgbuildPath: string;
-  srcinfoPath: string;
-  skipChecksum: boolean;
-  forcePublish: boolean;
 }
+
+export type CliCommand =
+  | (ChannelCommand & { mode: "check" })
+  | (ChannelCommand & {
+      mode: "update";
+      skipChecksum: boolean;
+    })
+  | (ChannelCommand & {
+      mode: "prepare";
+      skipChecksum: boolean;
+      forcePublish: boolean;
+    })
+  | (ChannelCommand & {
+      mode: "srcinfo";
+      srcinfoPath: string;
+    });
 
 export function getUsageText() {
   return usage;
@@ -35,8 +47,8 @@ function parseMode(options: {
   update?: boolean;
   prepare?: boolean;
   srcinfo?: boolean;
-}): CliOptions["mode"] {
-  const selectedModes: CliOptions["mode"][] = [];
+}): CliCommand["mode"] {
+  const selectedModes: CliCommand["mode"][] = [];
   if (options.check) selectedModes.push("check");
   if (options.update) selectedModes.push("update");
   if (options.prepare) selectedModes.push("prepare");
@@ -54,7 +66,7 @@ function parseMode(options: {
   return mode;
 }
 
-export function parseCliOptions(args: string[]): CliOptions {
+export function parseCliOptions(args: string[]): CliCommand {
   const program = new Command()
     .name("scripts/update.ts")
     .exitOverride()
@@ -111,12 +123,20 @@ export function parseCliOptions(args: string[]): CliOptions {
     throw new Error("--force-publish requires --prepare");
   }
 
-  return {
-    mode,
-    channel,
-    pkgbuildPath,
-    srcinfoPath,
-    skipChecksum,
-    forcePublish,
-  };
+  switch (mode) {
+    case "check":
+      return { mode, channel, pkgbuildPath };
+    case "update":
+      return { mode, channel, pkgbuildPath, skipChecksum };
+    case "prepare":
+      return {
+        mode,
+        channel,
+        pkgbuildPath,
+        skipChecksum,
+        forcePublish,
+      };
+    case "srcinfo":
+      return { mode, channel, pkgbuildPath, srcinfoPath };
+  }
 }
