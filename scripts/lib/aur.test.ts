@@ -68,6 +68,25 @@ describe("isAurPackageCurrent", () => {
     ).toBe(false);
   });
 
+  test.each([
+    ["CRLF", (content: string) => content.replace(/\n/g, "\r\n")],
+    ["extra trailing newline", (content: string) => `${content}\n`],
+  ])("detects %s content drift", async (_name, mutate) => {
+    const files = await localAurFiles();
+    expect(
+      await isAurPackageCurrent(
+        target,
+        async () =>
+          files.map((file) =>
+            file.filename === "cursor-launcher.sh" &&
+            file.content !== null
+              ? { ...file, content: mutate(file.content) }
+              : file,
+          ),
+      ),
+    ).toBe(false);
+  });
+
   test("fails closed when AUR cannot be compared", async () => {
     expect(
       isAurPackageCurrent(target, async () => {

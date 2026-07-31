@@ -95,10 +95,6 @@ async function readAurPackageFromGit(packageName: string) {
 const defaultAurPackageReader: AurPackageReader =
   readAurPackageFromGit;
 
-function normalize(content: string) {
-  return `${content.replace(/\r\n/g, "\n").replace(/\n+$/, "")}\n`;
-}
-
 export async function isAurPackageCurrent(
   target: ChannelTarget,
   readAurPackage: AurPackageReader = defaultAurPackageReader,
@@ -129,7 +125,7 @@ export async function isAurPackageCurrent(
       remoteFile !== undefined &&
       remoteFile.mode === mode &&
       remoteFile.content !== null &&
-      normalize(remoteFile.content) === normalize(content)
+      remoteFile.content === content
     );
   });
 }
