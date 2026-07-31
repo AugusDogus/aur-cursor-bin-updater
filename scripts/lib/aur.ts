@@ -14,7 +14,7 @@ import type { ChannelTarget } from "./channels";
 
 export type RemoteAurFile = {
   filename: string;
-  content: string | null;
+  content: Uint8Array | null;
   mode: "644" | "755" | null;
 };
 
@@ -81,9 +81,7 @@ async function readAurPackageFromGit(packageName: string) {
         return {
           filename,
           mode,
-          content: metadata.isFile()
-            ? await readFile(path, "utf8")
-            : null,
+          content: metadata.isFile() ? await readFile(path) : null,
         };
       }),
     );
@@ -94,6 +92,18 @@ async function readAurPackageFromGit(packageName: string) {
 
 const defaultAurPackageReader: AurPackageReader =
   readAurPackageFromGit;
+const utf8Encoder = new TextEncoder();
+
+export function hasEqualBytes(
+  localContent: string,
+  remoteContent: Uint8Array,
+) {
+  const localBytes = utf8Encoder.encode(localContent);
+  return (
+    localBytes.length === remoteContent.length &&
+    localBytes.every((byte, index) => remoteContent[index] === byte)
+  );
+}
 
 export async function isAurPackageCurrent(
   target: ChannelTarget,
@@ -125,7 +135,7 @@ export async function isAurPackageCurrent(
       remoteFile !== undefined &&
       remoteFile.mode === mode &&
       remoteFile.content !== null &&
-      remoteFile.content === content
+      hasEqualBytes(content, remoteFile.content)
     );
   });
 }

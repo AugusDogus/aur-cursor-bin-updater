@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { getAurPackageFiles } from "./aur-manifest";
 import {
+  hasEqualBytes,
   isAurPackageCurrent,
   type AurPackageReader,
   type RemoteAurFile,
@@ -9,6 +10,8 @@ import {
 import { getChannelTarget } from "./channels";
 
 const target = getChannelTarget("nightly");
+const utf8Decoder = new TextDecoder();
+const utf8Encoder = new TextEncoder();
 
 async function localAurFiles(): Promise<
   readonly RemoteAurFile[]
@@ -16,7 +19,7 @@ async function localAurFiles(): Promise<
   return (await getAurPackageFiles(target)).map(
     ({ filename, content, mode }) => ({
       filename,
-      content,
+      content: utf8Encoder.encode(content),
       mode,
     }),
   );
@@ -32,8 +35,11 @@ describe("isAurPackageCurrent", () => {
       files.map((file) => ({
         ...file,
         content:
-          file.filename === "cursor-launcher.sh"
-            ? `${file.content}\nchanged\n`
+          file.filename === "cursor-launcher.sh" &&
+          file.content !== null
+            ? utf8Encoder.encode(
+                `${utf8Decoder.decode(file.content)}\nchanged\n`,
+              )
             : file.content,
       }));
     expect(await isAurPackageCurrent(target, driftedReader)).toBe(false);
@@ -46,7 +52,7 @@ describe("isAurPackageCurrent", () => {
         ...files,
         {
           filename: "obsolete.patch",
-          content: "old",
+          content: utf8Encoder.encode("old"),
           mode: "644",
         },
       ]),
@@ -80,11 +86,22 @@ describe("isAurPackageCurrent", () => {
           files.map((file) =>
             file.filename === "cursor-launcher.sh" &&
             file.content !== null
-              ? { ...file, content: mutate(file.content) }
+              ? {
+                  ...file,
+                  content: utf8Encoder.encode(
+                    mutate(utf8Decoder.decode(file.content)),
+                  ),
+                }
               : file,
           ),
       ),
     ).toBe(false);
+  });
+
+  test("compares raw bytes instead of decoded replacement characters", () => {
+    expect(hasEqualBytes("\uFFFD", new Uint8Array([0x80]))).toBe(
+      false,
+    );
   });
 
   test("fails closed when AUR cannot be compared", async () => {

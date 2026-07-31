@@ -20,12 +20,17 @@ afterEach(async () => {
   );
 });
 
+async function temporaryDirectory() {
+  const directory = await mkdtemp(
+    join(tmpdir(), "local-source-checksums-"),
+  );
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
 describe("getLocalSourceChecksumFailures", () => {
   test("requires every PKGBUILD local source in the manifest", async () => {
-    const directory = await mkdtemp(
-      join(tmpdir(), "local-source-checksums-"),
-    );
-    temporaryDirectories.push(directory);
+    const directory = await temporaryDirectory();
     const pkgbuildPath = join(directory, "PKGBUILD");
     const declaredSourcePath = join(directory, "declared.txt");
     await Promise.all([
@@ -52,10 +57,7 @@ sha512sums=('SKIP' 'SKIP')
   });
 
   test("reports a checksum mismatch", async () => {
-    const directory = await mkdtemp(
-      join(tmpdir(), "local-source-checksums-"),
-    );
-    temporaryDirectories.push(directory);
+    const directory = await temporaryDirectory();
     const pkgbuildPath = join(directory, "PKGBUILD");
     const sourcePath = join(directory, "source.txt");
     const originalContent = "original";
@@ -81,10 +83,7 @@ sha512sums=('${expected}')
   });
 
   test("recognizes supported remote source forms", async () => {
-    const directory = await mkdtemp(
-      join(tmpdir(), "local-source-checksums-"),
-    );
-    temporaryDirectories.push(directory);
+    const directory = await temporaryDirectory();
     const pkgbuildPath = join(directory, "PKGBUILD");
     await writeFile(
       pkgbuildPath,

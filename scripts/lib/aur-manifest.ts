@@ -15,6 +15,11 @@ import { generateSrcinfo } from "./pkgbuild";
 export const aurStagingDirectory = ".aur";
 export const aurPublishManifestName = ".publish-manifest";
 const aurFilenamePattern = /^[A-Za-z0-9._-]+$/;
+const reservedAurFilenames = new Set([
+  ".",
+  "..",
+  aurPublishManifestName,
+]);
 
 type AurPackageFileContents = {
   mode: "644" | "755";
@@ -82,6 +87,9 @@ function validateAurPackageFiles(
     if (!aurFilenamePattern.test(filename)) {
       throw new Error(`Invalid AUR filename: ${filename}`);
     }
+    if (reservedAurFilenames.has(filename)) {
+      throw new Error(`Reserved AUR filename: ${filename}`);
+    }
     if (filenames.has(filename)) {
       throw new Error(`AUR manifest contains duplicate filename: ${filename}`);
     }
@@ -107,9 +115,15 @@ function hasErrorCode(error: unknown, code: string) {
   return error instanceof Error && "code" in error && error.code === code;
 }
 
-async function replaceStagingDirectory(
+type RenameDirectory = (
+  sourcePath: string,
+  destinationPath: string,
+) => Promise<void>;
+
+export async function replaceStagingDirectory(
   sourceDirectory: string,
   destinationDirectory: string,
+  renameDirectory: RenameDirectory = rename,
 ) {
   const parentDirectory = dirname(destinationDirectory);
   const destinationName = basename(destinationDirectory);
@@ -120,7 +134,7 @@ async function replaceStagingDirectory(
 
   let hasBackup = false;
   try {
-    await rename(destinationDirectory, backupDirectory);
+    await renameDirectory(destinationDirectory, backupDirectory);
     hasBackup = true;
   } catch (error: unknown) {
     if (!hasErrorCode(error, "ENOENT")) {
@@ -129,10 +143,17 @@ async function replaceStagingDirectory(
   }
 
   try {
-    await rename(sourceDirectory, destinationDirectory);
+    await renameDirectory(sourceDirectory, destinationDirectory);
   } catch (error: unknown) {
     if (hasBackup) {
-      await rename(backupDirectory, destinationDirectory);
+      try {
+        await renameDirectory(backupDirectory, destinationDirectory);
+      } catch (restoreError: unknown) {
+        throw new AggregateError(
+          [error, restoreError],
+          `Failed to restore ${destinationDirectory} from ${backupDirectory}`,
+        );
+      }
     }
     throw error;
   }

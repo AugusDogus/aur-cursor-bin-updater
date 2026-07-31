@@ -83,7 +83,7 @@ describe("getLatestRelease", () => {
             JSON.stringify({ version: "9.9.9", url: "not-a-url" }),
           ),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/url/i);
   });
 
   test("returns one release only when every architecture matches", async () => {

@@ -27,21 +27,15 @@ async function temporaryDirectory() {
   return directory;
 }
 
-async function materialize(
-  manifestPath: string,
-  sourceDirectory: string,
-  destinationDirectory: string,
-) {
+async function runMaterialize(args: readonly string[]) {
   const process = Bun.spawn(
     [
       "bash",
       "-c",
-      'source "$1"; materialize_aur_payload "$2" "$3" "$4"',
+      'source "$1"; shift; materialize_aur_payload "$@"',
       "bash",
       helperPath,
-      manifestPath,
-      sourceDirectory,
-      destinationDirectory,
+      ...args,
     ],
     { stderr: "pipe" },
   );
@@ -50,6 +44,63 @@ async function materialize(
     stderr: await new Response(process.stderr).text(),
   };
 }
+
+async function materialize(
+  manifestPath: string,
+  sourceDirectory: string,
+  destinationDirectory: string,
+) {
+  return runMaterialize([
+    manifestPath,
+    sourceDirectory,
+    destinationDirectory,
+  ]);
+}
+
+const rejectionCases = [
+  [
+    "missing manifest",
+    undefined,
+    "Missing AUR publication manifest",
+  ],
+  ["empty manifest", "", "AUR publication manifest is empty"],
+  ["invalid mode", "600\tPKGBUILD\n", "Invalid AUR file mode"],
+  [
+    "unsafe filename",
+    "644\t../escaped\n",
+    "Invalid AUR filename",
+  ],
+  [
+    "reserved current-directory filename",
+    "644\t.\n",
+    "Reserved AUR filename",
+  ],
+  [
+    "reserved parent-directory filename",
+    "644\t..\n",
+    "Reserved AUR filename",
+  ],
+  [
+    "reserved manifest filename",
+    "644\t.publish-manifest\n",
+    "Reserved AUR filename",
+  ],
+  [
+    "duplicate filename",
+    "644\tPKGBUILD\n644\tPKGBUILD\n",
+    "Duplicate AUR filename",
+  ],
+  [
+    "missing PKGBUILD",
+    "644\tcursor.desktop\n",
+    "AUR publication manifest must contain exactly one PKGBUILD",
+  ],
+  [
+    "missing staged file",
+    "644\tPKGBUILD\n",
+    "Missing staged AUR file",
+  ],
+] as const;
 
 describe("materialize_aur_payload", () => {
   test("copies every validated manifest entry with its declared mode", async () => {
@@ -84,43 +135,9 @@ describe("materialize_aur_payload", () => {
     ).toBe(0o755);
   });
 
-  test("rejects every invalid manifest boundary", async () => {
-    const rejectionCases: readonly {
-      manifest: string | undefined;
-      expectedError: string;
-    }[] = [
-      {
-        manifest: undefined,
-        expectedError: "Missing AUR publication manifest",
-      },
-      {
-        manifest: "",
-        expectedError: "AUR publication manifest is empty",
-      },
-      {
-        manifest: "600\tPKGBUILD\n",
-        expectedError: "Invalid AUR file mode",
-      },
-      {
-        manifest: "644\t../escaped\n",
-        expectedError: "Invalid AUR filename",
-      },
-      {
-        manifest: "644\tPKGBUILD\n644\tPKGBUILD\n",
-        expectedError: "Duplicate AUR filename",
-      },
-      {
-        manifest: "644\tcursor.desktop\n",
-        expectedError:
-          "AUR publication manifest must contain exactly one PKGBUILD",
-      },
-      {
-        manifest: "644\tPKGBUILD\n",
-        expectedError: "Missing staged AUR file",
-      },
-    ];
-
-    for (const { manifest, expectedError } of rejectionCases) {
+  test.each(rejectionCases)(
+    "rejects %s",
+    async (_name, manifest, expectedError) => {
       const root = await temporaryDirectory();
       const sourceDirectory = join(root, "source");
       const destinationDirectory = join(root, "destination");
@@ -141,6 +158,63 @@ describe("materialize_aur_payload", () => {
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain(expectedError);
-    }
+    },
+  );
+
+  test("returns usage status for the wrong argument count", async () => {
+    expect(await runMaterialize([])).toEqual({
+      exitCode: 2,
+      stderr: expect.stringContaining("Usage: materialize_aur_payload"),
+    });
+  });
+
+  test("rejects a missing destination directory", async () => {
+    const root = await temporaryDirectory();
+    const sourceDirectory = join(root, "source");
+    const destinationDirectory = join(root, "missing");
+    const manifestPath = join(sourceDirectory, ".publish-manifest");
+    await mkdir(sourceDirectory);
+    await Promise.all([
+      writeFile(manifestPath, "644\tPKGBUILD\n"),
+      writeFile(join(sourceDirectory, "PKGBUILD"), "pkgname=test\n"),
+    ]);
+
+    const result = await materialize(
+      manifestPath,
+      sourceDirectory,
+      destinationDirectory,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      "AUR destination directory is missing or not writable",
+    );
+  });
+
+  test("reports an install failure instead of partial success", async () => {
+    const root = await temporaryDirectory();
+    const sourceDirectory = join(root, "source");
+    const destinationDirectory = join(root, "destination");
+    const manifestPath = join(sourceDirectory, ".publish-manifest");
+    await Promise.all([
+      mkdir(sourceDirectory),
+      mkdir(destinationDirectory),
+    ]);
+    await Promise.all([
+      writeFile(manifestPath, "644\tPKGBUILD\n"),
+      writeFile(join(sourceDirectory, "PKGBUILD"), "pkgname=test\n"),
+    ]);
+    await chmod(join(sourceDirectory, "PKGBUILD"), 0o000);
+
+    const result = await materialize(
+      manifestPath,
+      sourceDirectory,
+      destinationDirectory,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      "Failed to install AUR file: PKGBUILD",
+    );
   });
 });

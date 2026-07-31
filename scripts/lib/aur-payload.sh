@@ -32,6 +32,12 @@ materialize_aur_payload() {
       echo "Invalid AUR filename in $manifest_path: $filename" >&2
       return 1
     fi
+    if [[ "$filename" == "." ||
+      "$filename" == ".." ||
+      "$filename" == ".publish-manifest" ]]; then
+      echo "Reserved AUR filename in $manifest_path: $filename" >&2
+      return 1
+    fi
     if [[ ${seen_filenames["$filename"]+present} ]]; then
       echo "Duplicate AUR filename in $manifest_path: $filename" >&2
       return 1
@@ -62,11 +68,20 @@ materialize_aur_payload() {
     fi
   done
 
+  if [[ ! -d "$destination_directory" ||
+    ! -w "$destination_directory" ]]; then
+    echo "AUR destination directory is missing or not writable: $destination_directory" >&2
+    return 1
+  fi
+
   for index in "${!filenames[@]}"; do
     mode=${modes[$index]}
     filename=${filenames[$index]}
-    install -m"$mode" \
+    if ! install -m"$mode" \
       "$source_directory/$filename" \
-      "$destination_directory/$filename"
+      "$destination_directory/$filename"; then
+      echo "Failed to install AUR file: $filename" >&2
+      return 1
+    fi
   done
 }
